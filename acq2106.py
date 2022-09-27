@@ -33,88 +33,235 @@ class ACQ2106(MDSplus.Device):
     """
     """
     
+    ###
+    ### Constants
+    ###
+    
+    MAX_SITES = 6
+    
+    # Trigger Source Options for Signal Highway d0
+    TRIGGER_SOURCE_D0_OPTIONS = [
+        'ext',          # External Trigger
+        'hdmi',         # HDMI Trigger
+        'gpg0',         # Gateway Pulse Generator Trigger
+        'wrtt0'         # White Rabbit Trigger
+    ]
+
+    # Trigger Source Options for Signal Highway d1
+    TRIGGER_SOURCE_D1_OPTIONS = [
+        'strig',        # Software Trigger
+        'hdmi_gpio',    # HDMI General Purpose I/O Trigger
+        'gpg1',         # Gateway Pulse Generator Trigger
+        'fp_sync',      # Front Panel SYNC
+        'wrtt1'         # White Rabbit Trigger
+    ]
+    
+    SYNC_ROLE_OPTIONS = [
+        'master',       # Master
+        'slave',        # Slave
+        'solo',         # Solo
+        'fpmaster',     # Front-Panel Master
+        'rpmaster'      # Rear-Panel Master
+    ]
+    
+    ###
+    ### Parts
+    ###
+    
     parts = [
         {
             'path': ':COMMENT',
             'type': 'text',
-            'options': ('no_write_shot',)
+            'options': ('no_write_shot',),
         },
         {
             'path': ':ADDRESS',
             'type': 'text',
             'value': '192.168.0.254',
-            'options': ('no_write_shot',)
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'IP Address or DNS Name of the digitizer.',
+            },
         },
         {
             'path': ':EPICS_NAME',
             'type': 'text',
             'value': 'acq2106_xxx',
-            'options': ('no_write_shot',)
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'EPICS Name of the digitizer, usually the Hostname.',
+            },
         },
         {
             'path': ':RUNNING',
             'type': 'numeric',
-            'options': ('no_write_model',)
+            'options': ('no_write_model',),
+            'ext_options': {
+                'tooltip': 'On if running, Off otherwise.',
+            },
         },
         {
             'path': ':SERIAL',
             'type': 'any', # ???
-            'options': ('no_write_shot',)
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Serial number of the ACQ2106, queried during configure().',
+            },
         },
         {
             'path': ':FIRMWARE',
             'type': 'any', # ???
-            'options': ('no_write_shot',)
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Firmware version of the ACQ2106, queried during configure().',
+            },
         },
         {
             'path': ':FPGA_IMAGE',
             'type': 'any', # ???
-            'options': ('no_write_shot',)
-        },
-        {
-            'path': ':TRIG_TIME',
-            'type': 'numeric',
-            'options': ('write_shot',)
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'FPGA Image version of the ACQ2106, queried during configure().',
+            },
         },
         {
             'path': ':SYNC_ROLE',
             'type': 'text',
             'options': ('no_write_shot',),
-            'values': [
-                'master', 'slave', 'solo', 'fpmaster', 'rpmaster'
-            ]
+            'ext_options': {
+                'tooltip': 'Used to determine what the clock is synchronized with/to.',
+                'values': SYNC_ROLE_OPTIONS,
+            },
+        },
+        {
+            'path': ':FREQUENCY',
+            'type': 'numeric',
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Sample Frequency in Hertz',
+            },
+        },
+        {
+            'path': ':TRIG_TIME',
+            'type': 'numeric',
+            'options': ('write_shot',),
+            'ext_options': {
+                'tooltip': 'Trigger Time', # TODO:
+            },
         },
         {
             'path': ':TRIG_SOURCE',
             'type': 'text',
             'options': ('no_write_shot',),
-            'values': [
-                'ext', 'hdmi', 'gpg0', 'wrtt0', # d0, hard
-                'strig', 'hdmi_gpio', 'gpg1', 'fp_sync', 'wrtt1', #d1, soft-ish
-            ]
+            'ext_options': {
+                'tooltip': 'Trigger Source, options will decided if the timing highway is d0 or d1.',
+                'values': TRIGGER_SOURCE_D0_OPTIONS + TRIGGER_SOURCE_D1_OPTIONS,
+            },
         },
         {
             'path': ':MODULES',
             'type': 'text',
             'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Comma-Separated list of modules, specified by model name or nothing if no module is present.',
+            },
         },
         {
             'path': ':HARD_DECIM',
             'type': 'numeric',
             'value': 1,
             'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Hardware Decimation (NACC), computed on the digitizer. Averages every N samples together. 1 = Disabled.',
+                'min': 1,
+                'max': 32,
+            },
         },
         {
             'path': ':SOFT_DECIM',
             'type': 'numeric',
             'value': 1,
             'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Default Software Decimation, can be overridden per-input, computed on the server. Discards every N-1 samples. 1 = Disabled.',
+                'min': 1,
+            },
         },
         {
             'path': ':RES_FACTOR',
             'type': 'numeric',
             'value': 100,
             'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Default Factor for Resampling, can be overridden per-input. 1 = Disabled.',
+                'min': 1,
+            },
+        },
+        
+        {
+            'path': ':STREAM',
+            'type': 'structure',
+        },
+        {
+            'path': ':STREAM:SEG_LENGTH',
+            'type': 'numeric',
+            'value': 8000, 
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Segment Length, number of samples to take before calling makeSegment().',
+                'min': 1024,
+            },
+        },
+        {
+            'path': ':STREAM:SEG_COUNT',
+            'type': 'numeric',
+            'value': 1000, 
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Segment Count, number of segments to capture before stopping.',
+                'min': 1,
+            },
+        },
+        {
+            'path': ':STREAM:EVENT_NAME',
+            'type': 'text',
+            'value': 'STREAM',
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Name of the event generated whenever a segment is captured.',
+            },
+        },
+        
+        {
+            'path': ':TRANSIENT',
+            'type': 'structure',
+        },
+        {
+            'path':':TRANSIENT:PRESAMPLES',
+            'type':'numeric',   
+            'value': 10000, 
+            'options':('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Number of samples to capture before the trigger.',
+            },
+        },
+        {
+            'path':':TRANSIENT:POSTSAMPLES',
+            'type':'numeric',  
+            'value': 10000, 
+            'options':('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Number of samples to capture after the trigger.',
+            },
+        },
+        {
+            'path':':TRANSIENT:EVENT_NAME',
+            'type':'text',  
+            'value': 'TRANSIENT', 
+            'options':('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Name of the event generated when the pre and post samples are stored.',
+            },
         },
     ]
     
@@ -127,27 +274,38 @@ class ACQ2106(MDSplus.Device):
         {
             'path': ':WRTD:TX_MESSAGE',
             'type': 'text',
-            'options': ('no_write_shot',)
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Message to send with WRTD when triggered.',
+            },
         },
         {
             'path': ':WRTD:TX_DELTANS',
             'type': 'numeric',
             'value': 50000000,
-            'options': ('no_write_shot',)
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Time in nanoseconds between when the WRTD message is sent, and when the trigger it describes should happen.',
+                'min': 50000000,
+            },
         },
         {
             'path': ':WRTD:RX0_FILTER',
             'type': 'text',
-            'options': ('no_write_shot',)
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Comma-Separated list of messages that will trigger WRTT0.',
+            },
         },
         {
             'path': ':WRTD:RX1_FILTER',
             'type': 'text',
-            'options': ('no_write_shot',)
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Comma-Separated list of messages that will trigger WRTT1.',
+            },
         },
     ]
-    
-    MAX_SITES = 6
     
     def help(self):
         print("""
@@ -163,17 +321,52 @@ class ACQ2106(MDSplus.Device):
         """)
     HELP = help
     
-    def init(self):
-        uut = self._getUUT()
-        
+    def arm(self):
+        pass
+    
+    ARM = arm
+    
+    def _get_calibration(self, uut):
+        uut.fetch_all_calibration()
+        coefficients = uut.cal_eslo[1:]
+        offsets = uut.cal_eoff[1:]
+    
+    def _set_sync_role(self, uut):
         sync_role_parts = uut.s0.sync_role.split()
         current_sync_role = sync_role_parts[0]
         current_frequency = int(sync_role_parts[1])
         current_ = sync_role_parts[0]
         
         sync_role = '%s %d TRG:DX=%s' % (self.SYNC_ROLE, self.FREQ)
+    
+    def _set_hardware_decimation(self, uut):
+        pass
+    
+    def init_stream(self):
+        uut = self._get_uut()
         
-    INIT = init
+        self._get_calibration(uut)
+        self._set_sync_role(uut)
+        self._set_hardware_decimation(uut)
+        
+        self.RUNNING.on = True
+        
+    INIT_STREAM = init_stream
+    
+    def init_transient(self):
+        pass
+        
+    INIT_TRANSIENT = init_transient
+    
+    # def stop(self):
+    #     self.RUNNING.on = False
+        
+    # STOP = stop
+    
+    def get_state(self):
+        uut = self._get_uut();
+        
+    GET_STATE = get_state
     
     def configure(self, mode='streaming', modules=None, has_wr=False):
         if not self.tree.isOpenForEdit():
@@ -203,8 +396,8 @@ class ACQ2106(MDSplus.Device):
                 if model:
                     print('Module assumed to be in site %d: %s' % (site, model,))
                 
-                    parts = self._getPartsForSite(site, model)
-                    self._addParts(parts)
+                    parts = self._get_parts_for_site(site, model)
+                    self._add_parts(parts)
                 
                 else:
                     print('No module assumed to be in site %d' % (site,))
@@ -214,7 +407,7 @@ class ACQ2106(MDSplus.Device):
             if has_wr:
                 print('Assuming White Rabbit capabilities')
         else:
-            uut = self._getUUT()
+            uut = self._get_uut()
             
             self.SERIAL.record = uut.s0.SERIAL
             
@@ -234,8 +427,8 @@ class ACQ2106(MDSplus.Device):
                     print('Module found in site %d: %s' % (site, model,))
                     modules[site - 1] = model
                     
-                    parts = self._getPartsForSite(site, model)
-                    self._addParts(parts)
+                    parts = self._get_parts_for_site(site, model)
+                    self._add_parts(parts)
                     
                     siteNode = self._getSite(site)
                     siteNode.SERIAL.record = client.SERIAL
@@ -250,7 +443,7 @@ class ACQ2106(MDSplus.Device):
                 print('Detected White Rabbit capabilities')
         
         if has_wr:
-            self._addParts(self.wrtd_parts)
+            self._add_parts(self.wrtd_parts)
         
         has_tiga = False
         if has_tiga:
@@ -282,7 +475,7 @@ class ACQ2106(MDSplus.Device):
                         'value': input.RESAMPLED,
                     },
                 ]
-            self._addParts(input_parts)
+            self._add_parts(input_parts)
             
         print('Found a total of %d inputs' % (len(self._configure_outputs),))
         
@@ -298,7 +491,7 @@ class ACQ2106(MDSplus.Device):
                     'type': 'signal',
                     'value': output,
                 })
-            self._addParts(output_parts)
+            self._add_parts(output_parts)
         
         # TODO: SPAD
         
@@ -315,7 +508,7 @@ class ACQ2106(MDSplus.Device):
     
     def verify(self):
         
-        uut = self._getUUT()
+        uut = self._get_uut()
         
         fpga_image = uut.s0.fpga_version
         if fpga_image != self.FPGA_IMAGE.data():
@@ -325,7 +518,7 @@ class ACQ2106(MDSplus.Device):
         
     VERIFY = verify
     
-    def _getUUT(self):
+    def _get_uut(self):
         import acq400_hapi
         return acq400_hapi.factory(self.ADDRESS.data())
         
@@ -335,7 +528,7 @@ class ACQ2106(MDSplus.Device):
         except:
             return None
     
-    def _addParts(self, parts, overwrite=False):
+    def _add_parts(self, parts, overwrite=False):
         # See MDSplus.Device.Add
         
         # Configure tree, path, and head as global variables, to be accessed from valueExpr
@@ -389,7 +582,7 @@ class ACQ2106(MDSplus.Device):
             if 'output' in part and part['output']:
                 self._configure_outputs.append(node)
             
-    def _setChannelSegmentScale(self, node, coefficient, offset):
+    def _set_input_segment_scale(self, node, coefficient, offset):
         node.setSegmentScale(
             MDSplus.ADD(
                 MDSplus.MULTIPLY(
@@ -400,7 +593,7 @@ class ACQ2106(MDSplus.Device):
             )
         )
     
-    def _getPartsForSite(self, site, model):
+    def _get_parts_for_site(self, site, model):
         site_path = ':SITE%d' % (site,)
         parts = [
             {
@@ -420,7 +613,7 @@ class ACQ2106(MDSplus.Device):
                     {
                         'path': input_path,
                         'type': 'signal',
-                        'valueExpr': 'head._setChannelSegmentScale(node, node.COEFFICIENT, node.OFFSET)',
+                        'valueExpr': 'head._set_input_segment_scale(node, node.COEFFICIENT, node.OFFSET)',
                         'input': True,
                     },
                     {
@@ -436,7 +629,7 @@ class ACQ2106(MDSplus.Device):
                     {
                         'path': input_path + ':RESAMPLED',
                         'type': 'signal',
-                        'valueExpr': 'head._setChannelSegmentScale(node, node.parent.COEFFICIENT, node.parent.OFFSET)'
+                        'valueExpr': 'head._set_input_segment_scale(node, node.parent.COEFFICIENT, node.parent.OFFSET)'
                     },
                     {
                         'path': input_path + ':RES_FACTOR',
