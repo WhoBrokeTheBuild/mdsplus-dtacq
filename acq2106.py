@@ -391,13 +391,15 @@ class ACQ2106(MDSplus.Device):
             },
         },
         {
+            # TODO: Only add this if data_size() is 4? Confirm?
             'path': ':HARD_DECIM',
             'type': 'numeric',
             'value': 1,
             'options': ('no_write_shot',),
             'ext_options': {
                 'tooltip': 'Hardware Decimation (NACC). Computed on the digitizer by averaging every N samples together. 1 = Disabled.',
-                'values': [ 1, 2, 4, 8, 16, 32 ], # TODO: Are only powers of two allowed?
+                'min': 1,
+                'max': 32,
             },
         },
         {
@@ -759,7 +761,9 @@ class ACQ2106(MDSplus.Device):
         current_frequency = int(current_sync_role_parts[1])
 
         # Keyword Arguments
-        current_arguments = self._string_to_dict(current_sync_role_parts[2])
+        current_arguments = dict()
+        if len(current_sync_role_parts) > 2:
+            current_arguments = self._string_to_dict(current_sync_role_parts[2])
 
         requested_arguments = dict()
 
@@ -823,6 +827,10 @@ class ACQ2106(MDSplus.Device):
             try:
                 self.device.tree.open()
 
+                uut = self.device._get_uut()
+                if uut is None:
+                    raise Exception(f"Unable to connect to digitizer ({self.device.ADDRESS.data()})")
+
                 temp_node = self.device.TEMP
                 temp_fpga_node = self.device.TEMP_FPGA
 
@@ -833,10 +841,6 @@ class ACQ2106(MDSplus.Device):
                         site_temp_nodes[name] = self.device.getNode(name).TEMP
                     except MDSplus.TreeNNF:
                         pass
-
-                uut = self.device._get_uut()
-                if uut is None:
-                    raise Exception(f"Unable to connect to digitizer ({self.device.ADDRESS.data()})")
 
                 # One Segment = One Hour
                 segment_size = 3600 / self.device._MONITOR_DELAY_SECONDS
@@ -1000,11 +1004,13 @@ class ACQ2106(MDSplus.Device):
                         input_node = site_node.getNode('INPUT_%02d' % (i + 1,))
                         software_decimations.append(int(input_node.SOFT_DECIM.data()))
 
-                # TODO: Test these assumptions
                 # Determine how many extra SPAD channels there are
-                _, spad, _ = uut.s0.spad.split(',') # 1,4,0 means 1=enabled??, 4=spad channels, 0=d0/d1 ???
-                self.nspad = int(spad)
-
+                # [0] is 1=enabled/0=disabled
+                # [1] is the number of SPAD channels
+                # [2] can be ignored
+                spad_enabled, spad, _ = uut.s0.spad.split(',')
+                self.nspad = int(spad) if spad_enabled == '1' else 0
+                
                 # All remaining channels are actual data
                 self.nchan = uut.nchan() - self.nspad
 
@@ -1182,6 +1188,9 @@ class ACQ2106(MDSplus.Device):
     GET_STATE = get_state
 
     def configure(self, has_wr=False):
+        import acq400_hapi
+        import socket
+        
         if not self.tree.isOpenForEdit():
             raise Exception('The tree must be open for edit in order to configure a device')
 
@@ -1215,11 +1224,43 @@ class ACQ2106(MDSplus.Device):
         ###
 
         aggregator_sites = []
-
-        # The default timeout is quite long, so we shorten that to a second
-        socket.setdefaulttimeout(1)
         
-        uut = self._get_uut()
+        online = True
+
+        # If there is no address, we don't need to try to connect
+        address = self.ADDRESS.getDataNoRaise()
+        if address is None or address == '':
+            self._warning('ADDRESS is blank, will configure offline.')
+            online = False
+            
+        ###
+        ### Determine if we are configuring Online or Offline
+        ###
+        
+        if online:
+            # Attempt to resolve the name so we can give a better error
+            try:
+                socket.gethostbyname(str(address))
+            except:
+                self._warning(f"ADDRESS '{address}' failed to resolve to an IP, will configure offline.")
+                online = False
+        
+        if online:
+            # Attempt to connect to the device to avoid the long default timeout
+            try:
+                self._info(f"Testing connection to ADDRESS '{address}'...")
+                test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                test_socket.settimeout(5)
+                test_socket.connect((self.ADDRESS.data(), acq400_hapi.AcqPorts.SITE0))
+                test_socket.close()
+            except OSError:
+                self._warning(f"Unable to connect to ADDRESS '{address}', will configure offline.")
+                online = False
+
+        uut = None
+        if online:
+            uut = self._get_uut()
+        
         if uut is None:
             ###
             ### Offline
@@ -1257,7 +1298,7 @@ class ACQ2106(MDSplus.Device):
             ###
             ### Online
             ###
-
+            
             self.SERIAL.record = uut.s0.SERIAL
 
             self._info(f"Firmware: {uut.s0.software_version}")
@@ -1427,7 +1468,9 @@ class ACQ2106(MDSplus.Device):
 
         for node in self.getNodeWild('***'):
             self._verbose(f"Verifying configuration for {node.path}")
+            
             value = node.getDataNoRaise()
+            
             if value is not None:
                 if node.usage == 'NUMERIC':
                     min_value = node.getExtendedAttribute('min')
@@ -1501,20 +1544,6 @@ class ACQ2106(MDSplus.Device):
 
     def _get_uut(self):
         import acq400_hapi
-
-        # If there is no address, we don't need to try to connect
-        address = self.ADDRESS.getDataNoRaise()
-        if address is None or address == '':
-            self._verbose('ADDRESS is blank, will configure offline.')
-            return None
-
-        # Attempt to resolve the name so we can fail fast
-        try:
-            address = socket.gethostbyname(str(address))
-        except:
-            self._verbose(f"ADDRESS '{address}' failed to resolve to an IP, will configure offline.")
-            return None
-
         return acq400_hapi.factory(self.ADDRESS.data())
 
     # TODO: Move this into MDSplus.Device?
