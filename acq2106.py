@@ -91,16 +91,20 @@ class ACQ2106(MDSplus.Device):
     '''
     # ACQ2106 Device Driver
 
+    # TODO: Note that HARD_DECIM is for 32-bit cards only
+
     ## Configuring
-    
+
     When you first add this driver to your tree, it is incomplete. You must do some initial configuration and then call the `configure` method.
     It is recommended to configure Online, meaning you can connect to your digitizer from the computer you are calling `configure` on. If you
     are not able to do so, you can configure Offline, but you must configure Online at least once before the driver can be used.
 
+    # TODO: Detail various arguments to configure()
+
     ### Modes
 
-    Before configuring, you must choose an operational mode. The default is `STREAM`. The mode controls how the device captures data, and what
-    nodes get added to the tree for configuration.
+    Before configuring, you must choose an operational mode. The mode controls how the device captures data, and what nodes get added to the
+    tree for configuration.
 
     #### STREAM
 
@@ -151,25 +155,26 @@ class ACQ2106(MDSplus.Device):
 
     ### Offline
 
+    # TODO: Explain that it will try to configure online first
     When configuring offline, you need to give the `configure` method most of the information it would otherwise query from the digitizer.
     At a minimum, you must fill in the following nodes:
     * `MODE` must contain the intended operation mode, see Modes for a list of available modes.
     * `MODULES` must contain a comma-separated list of the model names of the installed modules in the form of SiteNumber=ModelName.
-      e.g. 1=ACQ423ELF,3=ACQ423ELF,6=DIO482 has ACQ423's in sites 1 and 3, and a DIO482 in site 6
+      e.g. "1=ACQ423ELF 3=ACQ423ELF 6=DIO482" has ACQ423's in sites 1 and 3, and a DIO482 in site 6
 
     For example:
     ```
     TCL> edit TREE_NAME
     TCL> put DEVICE_NODE:MODE """STREAM"""
     TCL> put DEVICE_NODE:MODULES """1=ACQ423ELF 3=ACQ423ELF 6=DIO482"""
-    TCL> do /method DEVICE_NODE configure # TODO: has_wr=True
+    TCL> do /method DEVICE_NODE configure /ARGUMENT="""has_wr=1 has_hudp=0 overwrite_data=1"""
     ```
     or
     ```py
     tree = MDSplus.Tree('EDIT', -1)
     tree.DEVICE_NODE.MODE.record = "STREAM"
     tree.DEVICE_NODE.MODULES.record = "1=ACQ423ELF 3=ACQ423ELF 6=DIO482"
-    tree.DEVICE_NODE.configure()
+    tree.DEVICE_NODE.configure(has_wr=True, has_hudp=False, overwrite_data=True)
     ```
 
     ## White Rabbit Trigger Distribution (WRTD)
@@ -288,7 +293,6 @@ class ACQ2106(MDSplus.Device):
         {
             'path': ':MODE',
             'type': 'text',
-            'value': 'STREAM',
             'options': ('no_write_shot',),
             'ext_options': {
                 'tooltip': 'The intended mode of operation.',
@@ -306,7 +310,6 @@ class ACQ2106(MDSplus.Device):
         {
             'path': ':ADDRESS',
             'type': 'text',
-            'value': '192.168.0.254',
             'options': ('no_write_shot',),
             'ext_options': {
                 'tooltip': 'IP Address or DNS Name of the digitizer.',
@@ -315,10 +318,9 @@ class ACQ2106(MDSplus.Device):
         {
             'path': ':EPICS_NAME',
             'type': 'text',
-            'value': 'acq2106_xxx',
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'EPICS Name of the digitizer, usually the Hostname.',
+                'tooltip': 'EPICS Name of the digitizer, usually the Hostname in the form of acq2106_xyz.',
             },
         },
         {
@@ -367,6 +369,7 @@ class ACQ2106(MDSplus.Device):
         {
             'path': ':RUNNING',
             'type': 'numeric',
+            # 'on': False,
             'options': ('no_write_model',),
             'ext_options': {
                 'tooltip': 'On if running, Off otherwise.',
@@ -388,18 +391,6 @@ class ACQ2106(MDSplus.Device):
             'ext_options': {
                 'tooltip': 'Trigger Source, options will decided if the timing highway is d0 or d1. For a soft trigger use STRIG, and for a hard trigger use EXT.',
                 'values': _TRIGGER_SOURCE_D0_OPTIONS + _TRIGGER_SOURCE_D1_OPTIONS,
-            },
-        },
-        {
-            # TODO: Only add this if data_size() is 4? Confirm?
-            'path': ':HARD_DECIM',
-            'type': 'numeric',
-            'value': 1,
-            'options': ('no_write_shot',),
-            'ext_options': {
-                'tooltip': 'Hardware Decimation (NACC). Computed on the digitizer by averaging every N samples together. 1 = Disabled.',
-                'min': 1,
-                'max': 32,
             },
         },
         {
@@ -435,6 +426,12 @@ class ACQ2106(MDSplus.Device):
             'ext_options': {
                 'tooltip': 'Temperature of the FPGA in celsius.',
             },
+        },
+        {
+            'path': ':INIT_ACTION',
+            'type': 'action',
+            'valueExpr': "Action(Dispatch('MDSIP_SERVER','INIT',50,None),Method(None,'INIT',head,'auto'))",
+            'options': ('no_write_shot',)
         },
         {
             'path': ':SCRATCHPAD',
@@ -473,7 +470,7 @@ class ACQ2106(MDSplus.Device):
             'options': ('no_write_model',),
         })
 
-    stream_parts = [
+    _stream_parts = [
         {
             'path': ':STREAM',
             'type': 'structure',
@@ -509,7 +506,7 @@ class ACQ2106(MDSplus.Device):
         },
     ]
 
-    transient_parts = [
+    _transient_parts = [
         {
             'path': ':TRANSIENT',
             'type': 'structure',
@@ -543,14 +540,14 @@ class ACQ2106(MDSplus.Device):
         },
     ]
 
-    wrtd_parts = [
+    _wr_parts = [
         {
-            'path': ':WRTD',
+            'path': ':WR',
             'type': 'structure',
             'options': ('no_write_shot',)
         },
         {
-            'path': ':WRTD:NS_PER_TICK',
+            'path': ':WR:NS_PER_TICK',
             'type': 'numeric',
             'options': ('no_write_model',),
             'ext_options': {
@@ -558,25 +555,25 @@ class ACQ2106(MDSplus.Device):
             },
         },
         {
-            'path': ':WRTD:TX_MESSAGE',
+            'path': ':WR:TX_MESSAGE',
             'type': 'text',
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Message to send with WRTD when triggered.',
+                'tooltip': 'Message to send with WR when triggered.',
             },
         },
         {
-            'path': ':WRTD:TX_DELTA_NS',
+            'path': ':WR:TX_DELTA_NS',
             'type': 'numeric',
             'value': 50000000,
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Time in nanoseconds between when the WRTD message is sent, and when the trigger it describes should happen.',
+                'tooltip': 'Time in nanoseconds between when the WR message is sent, and when the trigger it describes should happen.',
                 'min': 50000000,
             },
         },
         {
-            'path': ':WRTD:RX0_FILTER',
+            'path': ':WR:RX0_FILTER',
             'type': 'text',
             'options': ('no_write_shot',),
             'ext_options': {
@@ -584,11 +581,25 @@ class ACQ2106(MDSplus.Device):
             },
         },
         {
-            'path': ':WRTD:RX1_FILTER',
+            'path': ':WR:RX1_FILTER',
             'type': 'text',
             'options': ('no_write_shot',),
             'ext_options': {
                 'tooltip': 'Comma-Separated list of messages that will trigger WRTT1.',
+            },
+        },
+    ]
+
+    _32bit_parts = [
+        {
+            'path': ':HARD_DECIM',
+            'type': 'numeric',
+            'value': 1,
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Hardware Decimation (NACC). Computed on the digitizer by averaging every N samples together. 1 = Disabled.',
+                'min': 1,
+                'max': 32,
             },
         },
     ]
@@ -740,7 +751,7 @@ class ACQ2106(MDSplus.Device):
         for site in list(map(int, uut.get_aggregator_sites())):
             client = uut.modules[site]
 
-            self._info('Reading Calibration for site %d' % (site,))
+            self._log_info('Reading Calibration for site %d' % (site,))
 
             coefficients = list(map(float, client.AI_CAL_ESLO.split()[3:]))
             offsets = list(map(float, client.AI_CAL_EOFF.split()[3:]))
@@ -778,23 +789,23 @@ class ACQ2106(MDSplus.Device):
         requested_sync_role = str(self.SYNC_ROLE.data()).lower()
         if current_sync_role != requested_sync_role:
             changed = True
-            self._info(f"Requested sync role of {requested_sync_role} differs from current configuration: {current_sync_role}")
+            self._log_info(f"Requested sync role of {requested_sync_role} differs from current configuration: {current_sync_role}")
 
         requested_frequency = int(self.FREQUENCY.data())
         if current_frequency != requested_frequency:
             changed = True
-            self._info(f"Requested frequency of {requested_frequency} differs from current configuration: {current_frequency}")
+            self._log_info(f"Requested frequency of {requested_frequency} differs from current configuration: {current_frequency}")
 
         if current_arguments != requested_arguments:
             changed = True
-            self._info(f"Requested sync role arguments '{self._dict_to_string(requested_arguments)}' differ from current configuration: '{self._dict_to_string(current_arguments)}'")
+            self._log_info(f"Requested sync role arguments '{self._dict_to_string(requested_arguments)}' differ from current configuration: '{self._dict_to_string(current_arguments)}'")
 
         if changed:
-            self._info('Reconfiguring sync role, this may take some time.')
+            self._log_info('Reconfiguring sync role, this may take some time.')
             uut.s0.sync_role = f"{self.SYNC_ROLE.data()} {int(self.FREQUENCY.data())} {self._dict_to_string(requested_arguments)}"
 
         # snyc_role will set a default trigger source, so we need to set these after
-        self._info(f"Setting trigger source of timing highway {requested_arguments['TRG:DX']} to {trigger_source}")
+        self._log_info(f"Setting trigger source of timing highway {requested_arguments['TRG:DX']} to {trigger_source}")
         if requested_arguments['TRG:DX'] == 'd0':
             uut.s0.SIG_SRC_TRG_0 = trigger_source
         elif requested_arguments['TRG:DX'] == 'd1':
@@ -802,19 +813,22 @@ class ACQ2106(MDSplus.Device):
 
         # If we are configured for White Rabbit, query the Nanoseconds / Tick
         try:
-            ns_per_tick_node = self.WRTD.NS_PER_TICK
+            ns_per_tick_node = self.WR.NS_PER_TICK
             ns_per_tick_node.record = float(uut.cC.WRTD_TICKNS)
         except MDSplus.TreeNNF:
             pass
 
     def _set_hardware_decimation(self, uut):
-        # TODO: Does setting it on site 0 set it on all of them?
+        # HARD_DECIM only exists for 32-bit modules
+        try:
+            decimation = str(self.HARD_DECIM.data())
+            self._log_info(f"Setting hardware decimation to {decimation}")
 
-        decimation = str(self.HARD_DECIM.data())
-        self._info(f"Setting hardware decimation to {decimation}")
+            for _, client in uut.modules.items():
+                client.nacc = decimation
 
-        for site, client in uut.modules.items():
-            client.nacc = decimation
+        except MDSplus.TreeNNF:
+            pass
 
     class Monitor(threading.Thread):
         """Monitor thread for recording device temperature and voltage"""
@@ -863,7 +877,7 @@ class ACQ2106(MDSplus.Device):
                         if name in sys_temp:
                             node.putRow(segment_size, float(sys_temp[name]), now)
 
-                    # TODO: Account for the time it took to write the temperatures 
+                    # TODO: Account for the time it took to write the temperatures
                     time.sleep(self.device._MONITOR_DELAY_SECONDS)
 
             except Exception as e:
@@ -907,7 +921,13 @@ class ACQ2106(MDSplus.Device):
                         # Turn off the unused SPAD nodes
                         spad_node.on = False
 
-                hardware_decimation = int(self.device.HARD_DECIM.data())
+                # HARD_DECIM only exists for 32-bit modules
+                hardware_decimation = 1
+                try:
+                    hardware_decimation = int(self.device.HARD_DECIM.data())
+                except MDSplus.TreeNNF:
+                    pass
+
                 delta_time = float(1.0 / self.device.FREQUENCY.data() * hardware_decimation)
 
                 event_name = self.device.STREAM.EVENT_NAME.data()
@@ -967,7 +987,7 @@ class ACQ2106(MDSplus.Device):
                     benchmark_elapsed = benchmark_end - benchmark_start
 
                     segment_index += 1
-                    self.device._info(f"Finished writing segment {segment_index}/{self.reader.segment_count}, took {benchmark_elapsed}s")
+                    self.device._log_info(f"Finished writing segment {segment_index}/{self.reader.segment_count}, took {benchmark_elapsed}s")
                     self.reader.empty_buffer_queue.put(buffer)
 
                     MDSplus.Event(event_name)
@@ -1010,7 +1030,7 @@ class ACQ2106(MDSplus.Device):
                 # [2] can be ignored
                 spad_enabled, spad, _ = uut.s0.spad.split(',')
                 self.nspad = int(spad) if spad_enabled == '1' else 0
-                
+
                 # All remaining channels are actual data
                 self.nchan = uut.nchan() - self.nspad
 
@@ -1020,7 +1040,7 @@ class ACQ2106(MDSplus.Device):
                 decimator = 1
                 for soft_decim in software_decimations:
                     decimator = int(decimator * soft_decim / gcd(decimator, soft_decim))
-                self.device._info(f"Calculated a greatest common decimator of {decimator}")
+                self.device._log_info(f"Calculated a greatest common decimator of {decimator}")
 
                 self.segment_length = int(self.device.STREAM.SEG_LENGTH.data())
                 self.segment_count = int(self.device.STREAM.SEG_COUNT.data())
@@ -1029,13 +1049,14 @@ class ACQ2106(MDSplus.Device):
                 if self.segment_length % decimator > 0:
                     old_segment_length = self.segment_length
                     self.segment_length = (self.segment_length // decimator + 1) * decimator
-                    self.device._info(f"Adjusting segment length to match lowest common decimator, {old_segment_length} -> {self.segment_length}")
-                    
+                    self.device._log_info(f"Adjusting segment length to match lowest common decimator, {old_segment_length} -> {self.segment_length}")
+
                     self.device.STREAM.SEG_LENGTH.record = self.segment_length
 
                 self.segment_size = self.segment_length * bytes_per_row
 
                 self.writer = self.device.StreamWriter(self)
+                self.writer.setDaemon(True)
                 self.writer.start()
 
                 # When TRIG_SOURCE is set to STRIG, opening the socket will actually trigger the device, so we have to do this last
@@ -1050,7 +1071,7 @@ class ACQ2106(MDSplus.Device):
                     try:
                         buffer = self.empty_buffer_queue.get(block=False)
                     except queue.Empty:
-                        self.device._verbose(f"No empty buffers available, creating new one of {self.segment_size} bytes")
+                        self.device._log_verbose(f"No empty buffers available, creating new one of {self.segment_size} bytes")
                         buffer = bytearray(self.segment_size)
 
                     bytes_needed = self.segment_size
@@ -1068,7 +1089,7 @@ class ACQ2106(MDSplus.Device):
                             bytes_needed -= bytes_read
 
                     except socket.timeout:
-                        self.device._warning("Socket connection timed out, retrying")
+                        self.device._log_warning("Socket connection timed out, retrying")
                         continue
 
                     except socket.error:
@@ -1079,9 +1100,9 @@ class ACQ2106(MDSplus.Device):
 
                     else:
                         self.full_buffer_queue.put(buffer)
-                        
+
                         segment_index += 1
-                        self.device._info(f"Finished reading segment {segment_index}/{self.segment_count}")
+                        self.device._log_info(f"Finished reading segment {segment_index}/{self.segment_count}")
 
             except Exception as e:
                 self.exception = e
@@ -1101,15 +1122,6 @@ class ACQ2106(MDSplus.Device):
                 if hasattr(self.writer, "exception"):
                     self.exception = self.writer.exception
 
-    def _init(self):
-        uut = self._get_uut()
-        if uut is None:
-            raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
-
-        self._get_calibration(uut)
-        self._set_sync_role(uut)
-        self._set_hardware_decimation(uut)
-
     ###
     ### Streaming Methods
     ###
@@ -1118,11 +1130,18 @@ class ACQ2106(MDSplus.Device):
         if self.MODE.data().upper() != 'STREAM':
             raise Exception('Device is not configured for streaming. Set MODE to "STREAM" and then run configure().')
 
-        self._init()
+        uut = self._get_uut()
+        if uut is None:
+            raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
+
+        self._get_calibration(uut)
+        self._set_sync_role(uut)
+        self._set_hardware_decimation(uut)
 
         self.RUNNING.on = True
 
         monitor = self.Monitor(self)
+        monitor.setDaemon(True)
         monitor.start()
 
         thread = self.StreamReader(self)
@@ -1138,6 +1157,14 @@ class ACQ2106(MDSplus.Device):
 
     STOP_STREAM = stop_stream
 
+    def abort_stream(self):
+        if self.MODE.data().upper() != 'STREAM':
+            raise Exception('Device is not configured for streaming. Set MODE to "STREAM" and then run configure().')
+
+        # TODO:
+
+    ABORT_STREAM = abort_stream
+
     ###
     ### Transient Methods
     ###
@@ -1146,12 +1173,21 @@ class ACQ2106(MDSplus.Device):
         if self.MODE.data().upper() != 'TRANSIENT':
             raise Exception('Device is not configured for transient recording. Set MODE to "TRANSIENT" and then run configure().')
 
-        self._init()
+        uut = self._get_uut()
+        if uut is None:
+            raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
 
+        self._get_calibration(uut)
+        self._set_sync_role(uut)
+        self._set_hardware_decimation(uut)
+        
         self.RUNNING.on = True
 
         monitor = self.Monitor(self)
+        monitor.setDaemon(True)
         monitor.start()
+
+        
 
     ARM_TRANSIENT = arm_transient
 
@@ -1160,7 +1196,7 @@ class ACQ2106(MDSplus.Device):
             raise Exception('Device is not configured for transient recording. Set MODE to "TRANSIENT" and then run configure().')
 
         self.RUNNING.on = False
-        
+
         # TODO: Store
 
     STORE_TRANSIENT = store_transient
@@ -1183,90 +1219,137 @@ class ACQ2106(MDSplus.Device):
             transient_state = uut.s0.TRANS_ACT_STATE.split()[1]
             print(f"State: {transient_state}")
         else:
-            print(f"Undefined Operation Mode {mode}, unable to get state")
+            self._log_warning(f"Undefined Operation Mode {mode}, unable to get state")
 
     GET_STATE = get_state
 
-    def configure(self, has_wr=False):
+    def configure(self, tcl_arguments=None, **kwargs):
         import acq400_hapi
         import socket
-        
+
         if not self.tree.isOpenForEdit():
             raise Exception('The tree must be open for edit in order to configure a device')
 
+        # Parse any arguments from TCL into the standard kwargs
+        # TODO: Case insensitive?
+        if tcl_arguments is not None:
+            kwargs.update(self._string_to_dict(tcl_arguments))
+
+        overwrite_data = False
+        if 'overwrite_data' in kwargs and self._to_bool(kwargs['overwrite_data']):
+            overwrite_data = True
+
+        # The list of all nodes added during configure() has to contain the root device node as well
         self._configure_nodes = [self]
 
         # Ensure that any new nodes in the parts array are taken care of, and add the original parts array to _configure_nodes
-        self._add_parts(self.parts)
+        self._add_parts(self.parts, overwrite_data)
 
-        ###
-        ### General
-        ###
+        # Ensure the RUNNING node is off by default
+        # TODO: Add on/off to the parts array?
+        self.RUNNING.on = False
+
+        # General Configuration
 
         self.TRIG_SOURCE.record = str(self.TRIG_SOURCE.data()).upper()
         self.SYNC_ROLE.record = str(self.SYNC_ROLE.data()).lower()
 
-        ###
-        ### Mode-Specific
-        ###
+        # Mode-Specific Configuration
 
         self.MODE.record = str(self.MODE.data()).upper()
 
         mode = self.MODE.data()
         if mode == 'STREAM':
-            self._add_parts(self.stream_parts)
-            self.RUNNING.on = False
+            self._add_parts(self._stream_parts, overwrite_data)
         elif mode == 'TRANSIENT':
-            self._add_parts(self.transient_parts)
+            self._add_parts(self._transient_parts, overwrite_data)
 
-        ###
-        ### Module-Specific
-        ###
+        # Determine if we are configuring Online or Offline
 
-        aggregator_sites = []
-        
         online = True
 
         # If there is no address, we don't need to try to connect
         address = self.ADDRESS.getDataNoRaise()
         if address is None or address == '':
-            self._warning('ADDRESS is blank, will configure offline.')
+            self._log_warning('ADDRESS is blank, will configure offline.')
             online = False
-            
-        ###
-        ### Determine if we are configuring Online or Offline
-        ###
-        
+
         if online:
             # Attempt to resolve the name so we can give a better error
             try:
                 socket.gethostbyname(str(address))
             except:
-                self._warning(f"ADDRESS '{address}' failed to resolve to an IP, will configure offline.")
+                self._log_warning(f"ADDRESS '{address}' failed to resolve to an IP, will configure offline.")
                 online = False
-        
+
         if online:
             # Attempt to connect to the device to avoid the long default timeout
             try:
-                self._info(f"Testing connection to ADDRESS '{address}'...")
+                self._log_info(f"Testing connection to ADDRESS '{address}'...")
                 test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 test_socket.settimeout(5)
                 test_socket.connect((self.ADDRESS.data(), acq400_hapi.AcqPorts.SITE0))
                 test_socket.close()
             except OSError:
-                self._warning(f"Unable to connect to ADDRESS '{address}', will configure offline.")
+                self._log_warning(f"Unable to connect to ADDRESS '{address}', will configure offline.")
                 online = False
 
         uut = None
         if online:
             uut = self._get_uut()
-        
-        if uut is None:
-            ###
-            ### Offline
-            ###
 
-            self._info('Configuring offline, you will need to run configure with access to the ACQ at least once before running.')
+        if uut is None:
+            online = False
+
+        # Online/Offline Configuration and Module-Specific Configuration
+
+        has_wr = False
+        has_hudp = False
+        data_size = 0
+        aggregator_sites = []
+
+        if online:
+            # Online
+
+            self.SERIAL.record = uut.s0.SERIAL
+
+            self._log_info(f"Firmware: {uut.s0.software_version}")
+            self.FIRMWARE.record = uut.s0.software_version
+
+            self._log_info(f"FPGA Image: {uut.s0.fpga_version}")
+            self.FPGA_IMAGE.record = uut.s0.fpga_version
+
+            modules = dict()
+            for site, client in sorted(uut.modules.items()):
+                model = client.MODEL.split(' ')[0]
+                modules[site] = model
+
+                self._log_info(f"Module found in site {site}: {model}")
+
+                parts = self._get_parts_for_site(site, model)
+                self._add_parts(parts, overwrite_data)
+
+                siteNode = self.getNode('SITE%d' % (site,))
+                siteNode.SERIAL.record = client.SERIAL
+
+            self.MODULES.record = self._dict_to_string(modules)
+
+            has_wr = (uut.s0.has_wr != 'none')
+            if has_wr:
+                self._log_info('Detected White Rabbit capabilities')
+
+            data_size = uut.data_size()
+
+            # TODO: has_hudp
+            # TODO: has_tiga
+
+            aggregator_sites = list(map(int, uut.get_aggregator_sites()))
+
+        else:
+
+            # Offline
+
+            self._log_info('Configuring offline, you will need to run configure with access to the ACQ at least once before running.')
 
             modules = self.MODULES.getDataNoRaise()
             if modules is None or modules == '':
@@ -1277,10 +1360,10 @@ class ACQ2106(MDSplus.Device):
             for site in range(1, self._MAX_SITES + 1):
                 if site in modules and modules[site] != '':
                     model = modules[site]
-                    self._info(f"Module assumed to be in site {site}: {model}")
+                    self._log_info(f"Module assumed to be in site {site}: {model}")
 
                     parts = self._get_parts_for_site(site, model)
-                    self._add_parts(parts)
+                    self._add_parts(parts, overwrite_data)
 
                     site_node = self.getNode('SITE%d' % (site,))
                     site_node.MODEL = model
@@ -1288,55 +1371,25 @@ class ACQ2106(MDSplus.Device):
                 else:
                     print(f"No module assumed to be in site {site}")
 
-            if has_wr:
-                self._info('Assuming White Rabbit capabilities')
+            if 'has_wr' in kwargs and self._to_bool(kwargs['has_wr']):
+                self._log_info('Assuming White Rabbit capabilities')
+                has_wr = True
+
+            # TODO: Approximate uut.data_size()
+            # data_size =
 
             # TODO: Approximate uut.get_aggregator_sites
             # aggregator_sites =
 
-        else:
-            ###
-            ### Online
-            ###
-            
-            self.SERIAL.record = uut.s0.SERIAL
-
-            self._info(f"Firmware: {uut.s0.software_version}")
-            self.FIRMWARE.record = uut.s0.software_version
-
-            self._info(f"FPGA Image: {uut.s0.fpga_version}")
-            self.FPGA_IMAGE.record = uut.s0.fpga_version
-
-            modules = dict()
-            for site, client in sorted(uut.modules.items()):
-                model = client.MODEL.split(' ')[0]
-                modules[site] = model
-
-                self._info(f"Module found in site {site}: {model}")
-
-                parts = self._get_parts_for_site(site, model)
-                self._add_parts(parts)
-
-                siteNode = self.getNode('SITE%d' % (site,))
-                siteNode.SERIAL.record = client.SERIAL
-
-            self.MODULES.record = self._dict_to_string(modules)
-
-            has_wr = (uut.s0.has_wr != 'none')
-            if has_wr:
-                self._info('Detected White Rabbit capabilities')
-
-            aggregator_sites = list(map(int, uut.get_aggregator_sites()))
-
         ###
-        ### White Rabbit
+        ### White Rabbit Nodes
         ###
 
         if has_wr:
-            self._add_parts(self.wrtd_parts)
+            self._add_parts(self._wr_parts, overwrite_data)
 
         ###
-        ### TIGA
+        ### TIGA Nodes
         ###
 
         has_tiga = False
@@ -1344,12 +1397,19 @@ class ACQ2106(MDSplus.Device):
             pass
 
         ###
-        ### HUDP
+        ### HUDP Nodes
         ###
 
         has_hudp = False
         if has_hudp:
             pass
+
+        ###
+        ### 32bit-only Nodes
+        ###
+
+        if data_size == 4:
+            self._add_parts(self._32bit_parts, overwrite_data)
 
         ###
         ### Aggregated Inputs
@@ -1367,7 +1427,7 @@ class ACQ2106(MDSplus.Device):
                 input_node = site_node.getNode('INPUT_%02d' % (i + 1,))
                 all_inputs.append(input_node)
 
-        self._info(f"Found a total of {len(all_inputs)} aggregated inputs")
+        self._log_info(f"Found a total of {len(all_inputs)} aggregated inputs")
 
         if len(all_inputs) > 0:
             input_parts = [
@@ -1390,7 +1450,7 @@ class ACQ2106(MDSplus.Device):
                         'value': input.RESAMPLED,
                     },
                 ]
-            self._add_parts(input_parts)
+            self._add_parts(input_parts, overwrite_data)
 
         # print('Found a total of %d inputs' % (len(self._configure_outputs),))
 
@@ -1406,7 +1466,7 @@ class ACQ2106(MDSplus.Device):
         #             'type': 'signal',
         #             'value': output,
         #         })
-        #     self._add_parts(output_parts)
+        #     self._add_parts(output_parts, overwrite_data)
 
         # TODO: SPAD
 
@@ -1418,14 +1478,14 @@ class ACQ2106(MDSplus.Device):
         bad_paths = [ str(MDSplus.TreeNode(nid, self.tree).path) for nid in bad_nids ]
         for path in bad_paths:
             try:
-                print(f"Removing {path}")
+                self._log_info(f"Removing {path}")
                 node = self.tree.getNode(path)
                 node.delete()
             except MDSplus.TreeNNF:
                 # node.delete() deletes all child nodes as well, so the node may already be gone
                 pass
             except MDSplus.SsSUCCESS:
-                # For some reason, node.delete() always throws this
+                # TODO: For some reason, node.delete() always throws this
                 pass
 
     CONFIGURE = configure
@@ -1448,11 +1508,11 @@ class ACQ2106(MDSplus.Device):
 
         firmware = uut.s0.software_version
         if firmware != self.FIRMWARE.data():
-            self._warning('The Firmware Version has changed, it is recommended that you run configure() again.')
+            self._log_warning('The Firmware Version has changed, it is recommended that you run configure() again.')
 
         fpga_image = uut.s0.fpga_version
         if fpga_image != self.FPGA_IMAGE.data():
-            self._warning('The FPGA image has changed, it is recommended that you run configure() again.')
+            self._log_warning('The FPGA image has changed, it is recommended that you run configure() again.')
 
         # Verify the configured modules
 
@@ -1467,10 +1527,10 @@ class ACQ2106(MDSplus.Device):
         # Verify the values of all nodes
 
         for node in self.getNodeWild('***'):
-            self._verbose(f"Verifying configuration for {node.path}")
-            
+            self._log_verbose(f"Verifying configuration for {node.path}")
+
             value = node.getDataNoRaise()
-            
+
             if value is not None:
                 if node.usage == 'NUMERIC':
                     min_value = node.getExtendedAttribute('min')
@@ -1513,14 +1573,14 @@ class ACQ2106(MDSplus.Device):
 
         # Verify White Rabbit
 
-        wrtd_node_exists = True
+        wr_node_exists = True
         try:
-            self.getNode('WRTD')
+            self.getNode('WR')
 
         except MDSplus.TreeNNF:
-            wrtd_node_exists = False
+            wr_node_exists = False
 
-        if wrtd_node_exists:
+        if wr_node_exists:
             if uut.s0.has_wr == 'none':
                 raise Exception('The last call to configure() had White Rabbit enabled, but the current FPGA Image does not support White Rabbit. You must run configure() again or change your FPGA Image and reboot.')
 
@@ -1530,16 +1590,16 @@ class ACQ2106(MDSplus.Device):
     ### Helper Methods
     ###
 
-    def _verbose(self, format, *args):
+    def _log_verbose(self, format, *args):
         self.dprint(4, format, *args)
 
-    def _info(self, format, *args):
+    def _log_info(self, format, *args):
         self.dprint(3, format, *args)
 
-    def _warning(self, format, *args):
+    def _log_warning(self, format, *args):
         self.dprint(2, format, *args)
 
-    def _error(self, format, *args):
+    def _log_error(self, format, *args):
         self.dprint(1, format, *args)
 
     def _get_uut(self):
@@ -1547,7 +1607,7 @@ class ACQ2106(MDSplus.Device):
         return acq400_hapi.factory(self.ADDRESS.data())
 
     # TODO: Move this into MDSplus.Device?
-    def _add_parts(self, parts, overwrite=False):
+    def _add_parts(self, parts, overwrite_data=False):
         # See MDSplus.Device.Add
 
         # Configure tree, path, and head as global variables, to be accessed from valueExpr
@@ -1560,10 +1620,10 @@ class ACQ2106(MDSplus.Device):
         for part in parts:
             try:
                 node = self.addNode(part['path'], part.get('type', 'none'))
-                self._verbose(f"Adding {node.path}")
+                self._log_verbose(f"Adding {node.path}")
             except MDSplus.mdsExceptions.TreeALREADY_THERE:
                 node = self.getNode(part['path'])
-                self._verbose(f"Found {node.path}")
+                self._log_verbose(f"Found {node.path}")
 
         # Then you can reference them in valueExpr
         for part in parts:
@@ -1597,25 +1657,30 @@ class ACQ2106(MDSplus.Device):
             if data is not None:
                 node.record = data
 
-            # Hack: For things that run a function in valueExpr, the data will still be None even if we don't want it to run again
-            if overwrite or node.time_inserted == 0:
+            # TODO: This is a hack, for things that run a function in valueExpr, the data will still be None even if we don't want it to run again
+            if overwrite_data or node.time_inserted == 0:
                 if 'value' in part:
-                    self._verbose(f"Setting value of {node.path} to: {str(part['value'])}")
+                    self._log_verbose(f"Setting value of {node.path} to: {str(part['value'])}")
                     node.record = part['value']
                 elif 'valueExpr' in part:
-                    self._verbose(f"Setting value of {node.path} to expression: {part['valueExpr']}")
+                    self._log_verbose(f"Setting value of {node.path} to expression: {part['valueExpr']}")
                     node.record = eval(part['valueExpr'], eval_globals)
 
-    def _set_input_segment_scale(self, node, coefficient, offset):
+    def _set_input_segment_scale(self, node, coefficient_node, offset_node):
         node.setSegmentScale(
             MDSplus.ADD(
                 MDSplus.MULTIPLY(
-                    coefficient,
+                    coefficient_node,
                     MDSplus.dVALUE()
                 ),
-                offset
+                offset_node
             )
         )
+
+    def _to_bool(self, value):
+        if value is str:
+            return value.lower() in [ "1", "true" ]
+        return bool(value)
 
     def _dict_to_string(self, dictionary):
         """Convert a dictionary into a string in the form key1=value1,key2=value2. See _string_to_dict as for the inverse."""
@@ -1624,21 +1689,21 @@ class ACQ2106(MDSplus.Device):
     def _string_to_dict(self, string):
         """Convert a string in the form key1=value1,key2=value2 into a dictionary. See _dict_to_string for the inverse."""
         dictionary = dict()
-        
+
         pairs = string.split(' ')
         if len(pairs) == 1:
             pairs = string.split(',')
-        
+
         for pair in pairs:
             if '=' in pair:
                 key, value = pair.split('=')
-                
+
                 if key.isnumeric():
                     key = int(key)
-                    
+
                 if value.isnumeric():
                     value = int(value)
-                    
+
                 dictionary[key] = value
             else:
                 dictionary[pair] = None
@@ -1669,3 +1734,7 @@ class ACQ2106(MDSplus.Device):
         # Calculate the TAI time in nanoseconds
         tai_timestamp = (tai_seconds * self._SECONDS_TO_NANOSECONDS) + tai_nanoseconds
         return int(tai_timestamp)
+
+
+class ACQ1001(ACQ2106):
+    _MAX_SITES = 1
