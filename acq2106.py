@@ -1108,6 +1108,8 @@ class ACQ2106(MDSplus.Device):
                 self.exception = e
                 traceback.print_exc()
 
+            self.socket.close()
+            
             # This will signal the StreamWriter that no more buffers will be coming
             self.full_buffer_queue.put(None)
 
