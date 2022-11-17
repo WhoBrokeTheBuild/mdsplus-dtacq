@@ -284,6 +284,8 @@ class ACQ2106(MDSplus.Device):
     ### Parts
     ###
 
+    # Nodes in the standard parts array are considered part of the conglomorate that makes up the device.
+    # This causes issues when you try to remove or change these nodes, so we only add the bare essentials.
     parts = [
         {
             'path': ':COMMENT',
@@ -323,6 +325,10 @@ class ACQ2106(MDSplus.Device):
                 'tooltip': 'EPICS Name of the digitizer, usually the Hostname in the form of acq2106_xyz.',
             },
         },
+    ]
+    
+    # Any additional parts that are needed, but are not included in the bare bones parts array above go here.
+    _default_parts = [
         {
             'path': ':SERIAL',
             'type': 'text',
@@ -394,26 +400,6 @@ class ACQ2106(MDSplus.Device):
             },
         },
         {
-            'path': ':SOFT_DECIM',
-            'type': 'numeric',
-            'value': 1,
-            'options': ('no_write_shot',),
-            'ext_options': {
-                'tooltip': 'Default Software Decimation, can be overridden per-input. Computed on the server by discarding every N-1 samples. 1 = Disabled.',
-                'min': 1,
-            },
-        },
-        {
-            'path': ':RES_FACTOR',
-            'type': 'numeric',
-            'value': 100,
-            'options': ('no_write_shot',),
-            'ext_options': {
-                'tooltip': 'Default Factor for Resampling, can be overridden per-input. 1 = Disabled.',
-                'min': 1,
-            },
-        },
-        {
             'path': ':TEMP',
             'type': 'signal',
             'ext_options': {
@@ -432,6 +418,30 @@ class ACQ2106(MDSplus.Device):
             'type': 'action',
             'valueExpr': "Action(Dispatch('MDSIP_SERVER','INIT',50,None),Method(None,'INIT',head,'auto'))",
             'options': ('no_write_shot',)
+        },
+        {
+            'path': ':DEFAULTS',
+            'type': 'structure',
+        },
+        {
+            'path': ':DEFAULTS:SOFT_DECIM',
+            'type': 'numeric',
+            'value': 1,
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Default Software Decimation, can be overridden per-input. Computed on the server by discarding every N-1 samples. 1 = Disabled.',
+                'min': 1,
+            },
+        },
+        {
+            'path': ':DEFAULTS:RES_FACTOR',
+            'type': 'numeric',
+            'value': 100,
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Default Factor for Resampling, can be overridden per-input. 1 = Disabled.',
+                'min': 1,
+            },
         },
         {
             'path': ':SCRATCHPAD',
@@ -464,7 +474,7 @@ class ACQ2106(MDSplus.Device):
     ]
 
     for i in range(3, _MAX_SPAD):
-        parts.append({
+        _default_parts.append({
             'path': ':SCRATCHPAD:SPAD%d' % (i,),
             'type': 'signal',
             'options': ('no_write_model',),
@@ -589,6 +599,40 @@ class ACQ2106(MDSplus.Device):
             },
         },
     ]
+    
+    _sc_parts = [
+        {
+            'path': ':DEFAULTS:SC_GAIN1',
+            'type': 'numeric',
+            'value': 1,
+            'options':('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Default Signal Conditioning Gain #1, applied before SC_OFFSET, can be overridden per-input.',
+                'values': [ 1, 10, 100, 1000 ],
+            },
+        },
+        {
+            'path': ':DEFAULTS:SC_GAIN2',
+            'type': 'numeric',
+            'value': 1,
+            'options':('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Default Signal Conditioning Gain #2, applied after SC_OFFSET, can be overridden per-input.',
+                'values': [ 1, 2, 5, 10 ],
+            },
+        },
+        {
+            'path': ':DEFAULTS:SC_OFFSET',
+            'type': 'numeric',
+            'value': 0,
+            'options':('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Default Signal Conditioning Offset, applied in-between SC_GAIN1 and SC_GAIN2, can be overridden per-input.',
+                'min': -2.5,
+                'max': 2.5,
+            },
+        },
+    ]
 
     _32bit_parts = [
         {
@@ -604,7 +648,7 @@ class ACQ2106(MDSplus.Device):
         },
     ]
 
-    def _get_parts_for_site(self, site, model):
+    def _get_parts_for_site(self, site, model, has_sc=False):
         site_path = ':SITE%d' % (site,)
         parts = [
             {
@@ -614,6 +658,7 @@ class ACQ2106(MDSplus.Device):
             {
                 'path': site_path + ':MODEL',
                 'type': 'text',
+                'value': model,
                 'ext_options': {
                     'tooltip': 'Model of the card in this site.',
                 },
@@ -654,9 +699,19 @@ class ACQ2106(MDSplus.Device):
                     {
                         'path': input_path + ':RES_FACTOR',
                         'type': 'numeric',
-                        'valueExpr': 'head.RES_FACTOR',
+                        'valueExpr': 'head.DEFAULTS.RES_FACTOR',
                         'ext_options': {
                             'tooltip': 'Factor for Resampling for this input. 1 = Disabled.',
+                            'min': 1,
+                        },
+                    },
+                    {
+                        'path': input_path + ':SOFT_DECIM',
+                        'type': 'numeric',
+                        'valueExpr': 'head.DEFAULTS.SOFT_DECIM',
+                        'options':('no_write_shot',),
+                        'ext_options': {
+                            'tooltip': 'Software Decimation for this input. Computed on the server by discarding every N-1 samples. 1 = Disabled.',
                             'min': 1,
                         },
                     },
@@ -675,18 +730,43 @@ class ACQ2106(MDSplus.Device):
                         'ext_options': {
                             'tooltip': 'Calibration offset for this input, queried from the digitizer.',
                         },
-                    },
-                    {
-                        'path': input_path + ':SOFT_DECIM',
-                        'type': 'numeric',
-                        'valueExpr': 'head.SOFT_DECIM',
-                        'options':('no_write_shot',),
-                        'ext_options': {
-                            'tooltip': 'Software Decimation for this input. Computed on the server by discarding every N-1 samples. 1 = Disabled.',
-                            'min': 1,
-                        },
                     }
                 ]
+                
+                if has_sc:
+                    parts += [
+                        {
+                            'path': input_path + ':SC_GAIN1',
+                            'type': 'numeric',
+                            'valueExpr': 'head.DEFAULTS.SC_GAIN1',
+                            'options':('no_write_shot',),
+                            'ext_options': {
+                                'tooltip': 'Signal Conditioning Gain #1 for this input, applied before the Offset.',
+                                'values': [ 1, 10, 100, 1000 ],
+                            },
+                        },
+                        {
+                            'path': input_path + ':SC_GAIN2',
+                            'type': 'numeric',
+                            'valueExpr': 'head.DEFAULTS.SC_GAIN2',
+                            'options':('no_write_shot',),
+                            'ext_options': {
+                                'tooltip': 'Signal Conditioning Gain #2 for this input, applied after the Offset.',
+                                'values': [ 1, 2, 5, 10 ],
+                            },
+                        },
+                        {
+                            'path': input_path + ':SC_OFFSET',
+                            'type': 'numeric',
+                            'valueExpr': 'head.DEFAULTS.SC_OFFSET',
+                            'options':('no_write_shot',),
+                            'ext_options': {
+                                'tooltip': 'Signal Conditioning Offset for this input, applied in-between Gain #1 and Gain #2.',
+                                'min': -2.5,
+                                'max': 2.5,
+                            },
+                        },
+                    ]
 
         elif model == 'ACQ424ELF':
             for i in range(32):
@@ -745,6 +825,12 @@ class ACQ2106(MDSplus.Device):
         ds = DeviceSetup(self)
         ds.run()
     SETUP = setup
+    
+    def _init(self, uut):
+        pass
+        # TODO: Put all the startup shit here
+        # siteNode = self.getNode('SITE%d' % (site,))
+        # siteNode.SERIAL.record = client.SERIAL
 
     def _get_calibration(self, uut):
         # In order to get the calibration per-site, we cannot use uut.fetch_all_calibration()
@@ -1108,11 +1194,11 @@ class ACQ2106(MDSplus.Device):
                 self.exception = e
                 traceback.print_exc()
 
+            # This will stop the digitizer from streaming
             self.socket.close()
             
             # This will signal the StreamWriter that no more buffers will be coming
             self.full_buffer_queue.put(None)
-
             self.device.RUNNING.on = False
 
             # Wait for the StreamWriter to finish
@@ -1246,6 +1332,9 @@ class ACQ2106(MDSplus.Device):
 
         # Ensure that any new nodes in the parts array are taken care of, and add the original parts array to _configure_nodes
         self._add_parts(self.parts, overwrite_data)
+        
+        # Add the default parts that are not included in the parts array
+        self._add_parts(self._default_parts, overwrite_data)
 
         # Ensure the RUNNING node is off by default
         # TODO: Add on/off to the parts array?
@@ -1308,11 +1397,12 @@ class ACQ2106(MDSplus.Device):
         has_wr = False
         has_hudp = False
         data_size = 0
+        site_parts = []
         aggregator_sites = []
 
         if online:
             # Online
-
+            
             self.SERIAL.record = uut.s0.SERIAL
 
             self._log_info(f"Firmware: {uut.s0.software_version}")
@@ -1321,25 +1411,30 @@ class ACQ2106(MDSplus.Device):
             self._log_info(f"FPGA Image: {uut.s0.fpga_version}")
             self.FPGA_IMAGE.record = uut.s0.fpga_version
 
-            modules = dict()
-            for site, client in sorted(uut.modules.items()):
-                model = client.MODEL.split(' ')[0]
-                modules[site] = model
-
-                self._log_info(f"Module found in site {site}: {model}")
-
-                parts = self._get_parts_for_site(site, model)
-                self._add_parts(parts, overwrite_data)
-
-                siteNode = self.getNode('SITE%d' % (site,))
-                siteNode.SERIAL.record = client.SERIAL
-
-            self.MODULES.record = self._dict_to_string(modules)
-
             has_wr = (uut.s0.has_wr != 'none')
             if has_wr:
                 self._log_info('Detected White Rabbit capabilities')
 
+            # If any site has Signal Conditioning, assume they all do
+            # TODO: Possibly improve?
+            has_sc = False
+            for site, client in sorted(uut.modules.items()):
+                if not has_sc and 'ELFX32' in client.knobs:
+                    has_sc = self._to_bool(client.ELFX32)
+                    self._log_info(f"Detected Signal Conditioning capabilities in site {site}")
+            
+            modules = dict()
+            for site, client in sorted(uut.modules.items()):
+                model = client.MODEL.split(' ')[0]
+                modules[site] = model
+                
+                self._log_info(f"Module found in site {site}: {model}")
+
+                site_parts += self._get_parts_for_site(site, model, has_sc=has_sc)
+                # self._add_parts(parts, overwrite_data)
+
+            self.MODULES.record = self._dict_to_string(modules)
+            
             data_size = uut.data_size()
 
             # TODO: has_hudp
@@ -1353,6 +1448,14 @@ class ACQ2106(MDSplus.Device):
 
             self._log_info('Configuring offline, you will need to run configure with access to the ACQ at least once before running.')
 
+            if 'has_wr' in kwargs and self._to_bool(kwargs['has_wr']):
+                self._log_info('Assuming White Rabbit capabilities')
+                has_wr = True
+                
+            if 'has_sc' in kwargs and self._to_bool(kwargs['has_sc']):
+                self._log_info('Assuming Signal Conditioning capabilities')
+                has_sc = True
+
             modules = self.MODULES.getDataNoRaise()
             if modules is None or modules == '':
                 raise Exception(f"When configuring offline, you must specify the modules manually.")
@@ -1364,19 +1467,13 @@ class ACQ2106(MDSplus.Device):
                     model = modules[site]
                     self._log_info(f"Module assumed to be in site {site}: {model}")
 
-                    parts = self._get_parts_for_site(site, model)
-                    self._add_parts(parts, overwrite_data)
-
-                    site_node = self.getNode('SITE%d' % (site,))
-                    site_node.MODEL = model
+                    site_parts += self._get_parts_for_site(site, model, has_sc=has_sc)
+                    # parts = self._get_parts_for_site(site, model, has_sc=has_sc)
+                    # self._add_parts(parts, overwrite_data)
 
                 else:
                     print(f"No module assumed to be in site {site}")
-
-            if 'has_wr' in kwargs and self._to_bool(kwargs['has_wr']):
-                self._log_info('Assuming White Rabbit capabilities')
-                has_wr = True
-
+            
             # TODO: Approximate uut.data_size()
             # data_size =
 
@@ -1389,6 +1486,13 @@ class ACQ2106(MDSplus.Device):
 
         if has_wr:
             self._add_parts(self._wr_parts, overwrite_data)
+            
+        ###
+        ### Signal Conditioning Nodes
+        ###
+            
+        if has_sc:
+            self._add_parts(self._sc_parts, overwrite_data)
 
         ###
         ### TIGA Nodes
@@ -1412,6 +1516,12 @@ class ACQ2106(MDSplus.Device):
 
         if data_size == 4:
             self._add_parts(self._32bit_parts, overwrite_data)
+            
+        ###
+        ### Site Nodes
+        ###
+        
+        self._add_parts(site_parts)
 
         ###
         ### Aggregated Inputs
@@ -1530,32 +1640,37 @@ class ACQ2106(MDSplus.Device):
 
         for node in self.getNodeWild('***'):
             self._log_verbose(f"Verifying configuration for {node.path}")
+            
+            if node.usage not in [ 'NUMERIC', 'TEXT' ]:
+                continue
 
-            value = node.getDataNoRaise()
+            try:
+                value = node.data()
+            except MDSplus.TreeNODATA:
+                continue
 
-            if value is not None:
-                if node.usage == 'NUMERIC':
-                    min_value = node.getExtendedAttribute('min')
-                    if min_value is not None:
-                        if value < min_value:
-                            raise Exception(f"Node {node.path} has invalid value of {value}, must be >= {min_value}")
+            if node.usage == 'NUMERIC':
+                min_value = node.getExtendedAttribute('min')
+                if min_value is not None:
+                    if value < min_value:
+                        raise Exception(f"Node {node.path} has invalid value of {value}, must be >= {min_value}")
 
-                    max_value = node.getExtendedAttribute('max')
-                    if max_value is not None:
-                        if value > max_value:
-                            raise Exception(f"Node {node.path} has invalid value of {value}, must be <= {max_value}")
+                max_value = node.getExtendedAttribute('max')
+                if max_value is not None:
+                    if value > max_value:
+                        raise Exception(f"Node {node.path} has invalid value of {value}, must be <= {max_value}")
 
-                    values = node.getExtendedAttribute('values')
-                    if values is not None:
-                        if value not in values:
-                            raise Exception(f"Node {node.path} has invalid value of {value}, must be one of {list(values)}")
+                values = node.getExtendedAttribute('values')
+                if values is not None:
+                    if value not in values:
+                        raise Exception(f"Node {node.path} has invalid value of {value}, must be one of {list(values)}")
 
-                elif node.usage == 'TEXT':
-                    values = node.getExtendedAttribute('values')
-                    # TODO: Maybe compare case insensitive?
-                    if values is not None:
-                        if value not in values:
-                            raise Exception(f"Node {node.path} has invalid value of {value}, must be one of {list(values)}")
+            elif node.usage == 'TEXT':
+                values = node.getExtendedAttribute('values')
+                # TODO: Maybe compare case insensitive?
+                if values is not None:
+                    if value not in values:
+                        raise Exception(f"Node {node.path} has invalid value of {value}, must be one of {list(values)}")
 
         # Verify the configured mode based on the nodes that should be there
 
@@ -1643,6 +1758,8 @@ class ACQ2106(MDSplus.Device):
                 for option in part['options']:
                     node.__setattr__(option, True)
 
+            # Part of a hack to circumvent XNCI's from destroying data
+            # Can be removed after https://github.com/MDSplus/mdsplus/pull/2498 is merged
             data = node.getDataNoRaise()
 
             if 'ext_options' in part:
@@ -1656,17 +1773,20 @@ class ACQ2106(MDSplus.Device):
 
                 node.no_write_model = no_write_model
 
-            if data is not None:
-                node.record = data
-
             # TODO: This is a hack, for things that run a function in valueExpr, the data will still be None even if we don't want it to run again
             if overwrite_data or node.time_inserted == 0:
+                print(overwrite_data, node.time_inserted)
+                
                 if 'value' in part:
                     self._log_verbose(f"Setting value of {node.path} to: {str(part['value'])}")
                     node.record = part['value']
                 elif 'valueExpr' in part:
                     self._log_verbose(f"Setting value of {node.path} to expression: {part['valueExpr']}")
                     node.record = eval(part['valueExpr'], eval_globals)
+            
+            # If we are not overwriting the data, set it back to the original
+            elif data is not None:
+                node.record = data
 
     def _set_input_segment_scale(self, node, coefficient_node, offset_node):
         node.setSegmentScale(
