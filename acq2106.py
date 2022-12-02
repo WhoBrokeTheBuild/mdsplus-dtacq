@@ -326,7 +326,7 @@ class ACQ2106(MDSplus.Device):
             },
         },
     ]
-    
+
     # Any additional parts that are needed, but are not included in the bare bones parts array above go here.
     _default_parts = [
         {
@@ -599,7 +599,7 @@ class ACQ2106(MDSplus.Device):
             },
         },
     ]
-    
+
     _sc_parts = [
         {
             'path': ':DEFAULTS:SC_GAIN1',
@@ -732,7 +732,19 @@ class ACQ2106(MDSplus.Device):
                         },
                     }
                 ]
-                
+
+                # if has_slow:
+                #     parts += [
+                #         {
+                #             'path': input_path + ':SLOW',
+                #             'type': 'signal',
+                #             'options':('no_write_model',),
+                #             'ext_options': {
+                #                 'tooltip': 'The 1Hz slow data, downsampled on the digitizer.',
+                #             },
+                #         },
+                #     ]
+
                 if has_sc:
                     parts += [
                         {
@@ -825,12 +837,24 @@ class ACQ2106(MDSplus.Device):
         ds = DeviceSetup(self)
         ds.run()
     SETUP = setup
-    
+
     def _init(self, uut):
-        pass
         # TODO: Put all the startup shit here
         # siteNode = self.getNode('SITE%d' % (site,))
         # siteNode.SERIAL.record = client.SERIAL
+
+        # TODO: Improve
+        #has_sc = False
+        #for site, client in sorted(uut.modules.items()):
+        #    if not has_sc and 'ELFX32' in client.knobs:
+        #        has_sc = self._to_bool(client.ELFX32)
+
+        #if has_sc:
+        #    self._set_signal_conditioning_gains(uut)
+
+        self._get_calibration(uut)
+        self._set_sync_role(uut)
+        self._set_hardware_decimation(uut)
 
     def _get_calibration(self, uut):
         # In order to get the calibration per-site, we cannot use uut.fetch_all_calibration()
@@ -842,7 +866,7 @@ class ACQ2106(MDSplus.Device):
             coefficients = list(map(float, client.AI_CAL_ESLO.split()[3:]))
             offsets = list(map(float, client.AI_CAL_EOFF.split()[3:]))
 
-            site_node = self.getNode('SITE%d' % (site,))
+            site_node = self.getNode(f"SITE{site}")
             for i in range(int(client.NCHAN)):
                 input_node = site_node.getNode('INPUT_%02d' % (i + 1,))
                 input_node.COEFFICIENT.record = coefficients[i]
@@ -916,16 +940,47 @@ class ACQ2106(MDSplus.Device):
         except MDSplus.TreeNNF:
             pass
 
+    def _set_signal_conditioning_gains(self, uut):
+        import epics
+
+        for site in list(map(int, uut.get_aggregator_sites())):
+            client = uut.modules[site]
+
+            self._log_info(f"Setting Signal Conditioning Gains and Offsets for site {site}")
+
+            site_node = self.getNode(f"SITE{site}")
+            epics_prefix = self.EPICS_NAME.data() + f":{site}:SC32:"
+
+            for i in range(int(client.NCHAN)):
+                input_node = site_node.getNode(f"INPUT_{i + 1:02d}")
+
+                pv = epics.PV(epics_prefix + f"G1:{i:02d}")
+                pv.put(str(input_node.SC_GAIN1.data()), wait=True)
+
+                pv = epics.PV(epics_prefix + f"G2:{i:02d}")
+                pv.put(str(input_node.SC_GAIN2.data()), wait=True)
+
+                pv = epics.PV(epics_prefix + f"OFFSET:{i:02d}")
+                pv.put(str(input_node.SC_OFFSET.data()), wait=True)
+
+            self._log_verbose(f"Comitting Signal Conditioning Gains and Offsets for site {site}")
+
+            pv = epics.PV(epics_prefix + 'GAIN:COMMIT')
+            pv.put('1')
+
     class Monitor(threading.Thread):
         """Monitor thread for recording device temperature and voltage"""
 
         def __init__(self, device):
             super(ACQ2106.Monitor, self).__init__(name="Monitor")
-            self.device = device.copy()
+            self.tree_name = device.tree.name
+            self.tree_shot = device.tree.shot
+            self.node_path = device.path
 
         def run(self):
             try:
-                self.device.tree.open()
+                self.tree = MDSplus.Tree(self.tree_name, self.tree_shot)
+                self.device = self.tree.getPath(self.node_path)
 
                 uut = self.device._get_uut()
                 if uut is None:
@@ -935,8 +990,8 @@ class ACQ2106(MDSplus.Device):
                 temp_fpga_node = self.device.TEMP_FPGA
 
                 site_temp_nodes = {}
-                for i in range(1, self.device._MAX_SITES + 1):
-                    name = 'SITE%d' % (i,)
+                for site in range(1, self.device._MAX_SITES + 1):
+                    name = f"SITE{site}"
                     try:
                         site_temp_nodes[name] = self.device.getNode(name).TEMP
                     except MDSplus.TreeNNF:
@@ -973,12 +1028,15 @@ class ACQ2106(MDSplus.Device):
     class StreamWriter(threading.Thread):
         def __init__(self, reader):
             super(ACQ2106.StreamWriter, self).__init__(name="StreamWriter")
-            self.device = reader.device.copy()
+            self.tree_name = reader.device.tree.name
+            self.tree_shot = reader.device.tree.shot
+            self.node_path = reader.device.path
             self.reader = reader
 
         def run(self):
             try:
-                self.device.tree.open()
+                self.tree = MDSplus.Tree(self.tree_name, self.tree_shot)
+                self.device = self.tree.getPath(self.node_path)
 
                 uut = self.device._get_uut()
                 if uut is None:
@@ -1086,14 +1144,17 @@ class ACQ2106(MDSplus.Device):
 
         def __init__(self, device):
             super(ACQ2106.StreamReader, self).__init__(name="StreamReader")
-            self.device = device.copy()
+            self.tree_name = device.tree.name
+            self.tree_shot = device.tree.shot
+            self.node_path = device.path
 
         def run(self):
             import acq400_hapi
             from fractions import gcd
 
             try:
-                self.device.tree.open()
+                self.tree = MDSplus.Tree(self.tree_name, self.tree_shot)
+                self.device = self.tree.getPath(self.node_path)
 
                 uut = self.device._get_uut()
                 if uut is None:
@@ -1196,7 +1257,7 @@ class ACQ2106(MDSplus.Device):
 
             # This will stop the digitizer from streaming
             self.socket.close()
-            
+
             # This will signal the StreamWriter that no more buffers will be coming
             self.full_buffer_queue.put(None)
             self.device.RUNNING.on = False
@@ -1222,9 +1283,7 @@ class ACQ2106(MDSplus.Device):
         if uut is None:
             raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
 
-        self._get_calibration(uut)
-        self._set_sync_role(uut)
-        self._set_hardware_decimation(uut)
+        self._init(uut)
 
         self.RUNNING.on = True
 
@@ -1265,17 +1324,15 @@ class ACQ2106(MDSplus.Device):
         if uut is None:
             raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
 
-        self._get_calibration(uut)
-        self._set_sync_role(uut)
-        self._set_hardware_decimation(uut)
-        
+        self._init(uut)
+
         self.RUNNING.on = True
 
         monitor = self.Monitor(self)
         monitor.setDaemon(True)
         monitor.start()
 
-        
+
 
     ARM_TRANSIENT = arm_transient
 
@@ -1332,7 +1389,7 @@ class ACQ2106(MDSplus.Device):
 
         # Ensure that any new nodes in the parts array are taken care of, and add the original parts array to _configure_nodes
         self._add_parts(self.parts, overwrite_data)
-        
+
         # Add the default parts that are not included in the parts array
         self._add_parts(self._default_parts, overwrite_data)
 
@@ -1402,7 +1459,7 @@ class ACQ2106(MDSplus.Device):
 
         if online:
             # Online
-            
+
             self.SERIAL.record = uut.s0.SERIAL
 
             self._log_info(f"Firmware: {uut.s0.software_version}")
@@ -1422,19 +1479,18 @@ class ACQ2106(MDSplus.Device):
                 if not has_sc and 'ELFX32' in client.knobs:
                     has_sc = self._to_bool(client.ELFX32)
                     self._log_info(f"Detected Signal Conditioning capabilities in site {site}")
-            
+
             modules = dict()
             for site, client in sorted(uut.modules.items()):
                 model = client.MODEL.split(' ')[0]
                 modules[site] = model
-                
+
                 self._log_info(f"Module found in site {site}: {model}")
 
                 site_parts += self._get_parts_for_site(site, model, has_sc=has_sc)
-                # self._add_parts(parts, overwrite_data)
 
             self.MODULES.record = self._dict_to_string(modules)
-            
+
             data_size = uut.data_size()
 
             # TODO: has_hudp
@@ -1451,7 +1507,7 @@ class ACQ2106(MDSplus.Device):
             if 'has_wr' in kwargs and self._to_bool(kwargs['has_wr']):
                 self._log_info('Assuming White Rabbit capabilities')
                 has_wr = True
-                
+
             if 'has_sc' in kwargs and self._to_bool(kwargs['has_sc']):
                 self._log_info('Assuming Signal Conditioning capabilities')
                 has_sc = True
@@ -1468,12 +1524,10 @@ class ACQ2106(MDSplus.Device):
                     self._log_info(f"Module assumed to be in site {site}: {model}")
 
                     site_parts += self._get_parts_for_site(site, model, has_sc=has_sc)
-                    # parts = self._get_parts_for_site(site, model, has_sc=has_sc)
-                    # self._add_parts(parts, overwrite_data)
 
                 else:
                     print(f"No module assumed to be in site {site}")
-            
+
             # TODO: Approximate uut.data_size()
             # data_size =
 
@@ -1486,11 +1540,11 @@ class ACQ2106(MDSplus.Device):
 
         if has_wr:
             self._add_parts(self._wr_parts, overwrite_data)
-            
+
         ###
         ### Signal Conditioning Nodes
         ###
-            
+
         if has_sc:
             self._add_parts(self._sc_parts, overwrite_data)
 
@@ -1516,11 +1570,11 @@ class ACQ2106(MDSplus.Device):
 
         if data_size == 4:
             self._add_parts(self._32bit_parts, overwrite_data)
-            
+
         ###
         ### Site Nodes
         ###
-        
+
         self._add_parts(site_parts)
 
         ###
@@ -1529,40 +1583,40 @@ class ACQ2106(MDSplus.Device):
 
         # TODO: Replace with Node Hardlinks when available
 
-        all_inputs = []
-        for site in aggregator_sites:
-            model = modules[site]
-            info = self._get_module_info(model)
+        # all_inputs = []
+        # for site in aggregator_sites:
+        #     model = modules[site]
+        #     info = self._get_module_info(model)
 
-            site_node = self.getNode('SITE%d' % (site,))
-            for i in range(info['nchan']):
-                input_node = site_node.getNode('INPUT_%02d' % (i + 1,))
-                all_inputs.append(input_node)
+        #     site_node = self.getNode('SITE%d' % (site,))
+        #     for i in range(info['nchan']):
+        #         input_node = site_node.getNode('INPUT_%02d' % (i + 1,))
+        #         all_inputs.append(input_node)
 
-        self._log_info(f"Found a total of {len(all_inputs)} aggregated inputs")
+        # self._log_info(f"Found a total of {len(all_inputs)} aggregated inputs")
 
-        if len(all_inputs) > 0:
-            input_parts = [
-                {
-                    'path': ':INPUTS',
-                    'type': 'structure',
-                }
-            ]
-            for i, input in enumerate(all_inputs):
-                input_path = ':INPUTS:INPUT_%03d' % (i + 1,)
-                input_parts += [
-                    {
-                        'path': input_path,
-                        'type': 'signal',
-                        'value': input,
-                    },
-                    {
-                        'path': input_path + ':RESAMPLED',
-                        'type': 'signal',
-                        'value': input.RESAMPLED,
-                    },
-                ]
-            self._add_parts(input_parts, overwrite_data)
+        # if len(all_inputs) > 0:
+        #     input_parts = [
+        #         {
+        #             'path': ':INPUTS',
+        #             'type': 'structure',
+        #         }
+        #     ]
+        #     for i, input in enumerate(all_inputs):
+        #         input_path = ':INPUTS:INPUT_%03d' % (i + 1,)
+        #         input_parts += [
+        #             {
+        #                 'path': input_path,
+        #                 'type': 'signal',
+        #                 'value': input,
+        #             },
+        #             {
+        #                 'path': input_path + ':RESAMPLED',
+        #                 'type': 'signal',
+        #                 'value': input.RESAMPLED,
+        #             },
+        #         ]
+        #     self._add_parts(input_parts, overwrite_data)
 
         # print('Found a total of %d inputs' % (len(self._configure_outputs),))
 
@@ -1640,7 +1694,7 @@ class ACQ2106(MDSplus.Device):
 
         for node in self.getNodeWild('***'):
             self._log_verbose(f"Verifying configuration for {node.path}")
-            
+
             if node.usage not in [ 'NUMERIC', 'TEXT' ]:
                 continue
 
@@ -1747,6 +1801,7 @@ class ACQ2106(MDSplus.Device):
             node = self.getNode(part['path'])
             self._configure_nodes.append(node)
 
+            # TODO: Port this back into Tree.py
             eval_globals['node'] = node
 
             usage = part.get('type', 'none').upper()
@@ -1758,12 +1813,12 @@ class ACQ2106(MDSplus.Device):
                 for option in part['options']:
                     node.__setattr__(option, True)
 
-            # Part of a hack to circumvent XNCI's from destroying data
+            # HACK: Part of a hack to circumvent XNCI's from destroying data
             # Can be removed after https://github.com/MDSplus/mdsplus/pull/2498 is merged
             data = node.getDataNoRaise()
 
             if 'ext_options' in part:
-                # If no_write_model is set, you are unable to set XNCIs, so we temporarily disable it
+                # HACK: If no_write_model is set, you are unable to set XNCIs, so we temporarily disable it
                 no_write_model = node.no_write_model
                 node.no_write_model = False
 
@@ -1773,17 +1828,15 @@ class ACQ2106(MDSplus.Device):
 
                 node.no_write_model = no_write_model
 
-            # TODO: This is a hack, for things that run a function in valueExpr, the data will still be None even if we don't want it to run again
+            # HACK: For things that run a function in valueExpr, the data will still be None even if we don't want it to run again
             if overwrite_data or node.time_inserted == 0:
-                print(overwrite_data, node.time_inserted)
-                
                 if 'value' in part:
                     self._log_verbose(f"Setting value of {node.path} to: {str(part['value'])}")
                     node.record = part['value']
                 elif 'valueExpr' in part:
                     self._log_verbose(f"Setting value of {node.path} to expression: {part['valueExpr']}")
                     node.record = eval(part['valueExpr'], eval_globals)
-            
+
             # If we are not overwriting the data, set it back to the original
             elif data is not None:
                 node.record = data
