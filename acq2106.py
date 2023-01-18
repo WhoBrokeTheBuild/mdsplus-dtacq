@@ -382,15 +382,27 @@ class ACQ2106(MDSplus.Device):
             },
         },
         {
-            'path': ':TRIG_TIME',
+            'path': ':TRIGGER',
+            'type': 'structure',
+        },
+        {
+            'path': ':TRIGGER:TIMESTAMP', # Or TIME_OF_DAY
             'type': 'numeric',
             'options': ('write_shot',),
             'ext_options': {
-                'tooltip': 'Trigger Time', # TODO:
+                'tooltip': 'Recorded trigger time as a UNIX timestamp in seconds.',
             },
         },
         {
-            'path': ':TRIG_SOURCE',
+            'path': ':TRIGGER:TIME_AT_0',
+            'type': 'numeric',
+            'options': ('write_shot',),
+            'ext_options': {
+                'tooltip': 'Time offset in seconds, used when building the Window(start, end, TIME_AT_0)',
+            },
+        },
+        {
+            'path': ':TRIGGER:SOURCE',
             'type': 'text',
             'value': 'EXT',
             'options': ('no_write_shot',),
@@ -888,7 +900,7 @@ class ACQ2106(MDSplus.Device):
 
         requested_arguments = dict()
 
-        trigger_source = str(self.TRIG_SOURCE.data()).upper()
+        trigger_source = str(self.TRIGGER.SOURCE.data()).upper()
         if trigger_source in self._TRIGGER_SOURCE_D0_OPTIONS:
             requested_arguments['TRG:DX'] = 'd0'
         elif trigger_source in self._TRIGGER_SOURCE_D1_OPTIONS:
@@ -1073,6 +1085,7 @@ class ACQ2106(MDSplus.Device):
                     pass
 
                 delta_time = float(1.0 / self.device.FREQUENCY.data() * hardware_decimation)
+                time_at_0 = self.device.TRIGGER.TIME_AT_0.data()
 
                 event_name = self.device.STREAM.EVENT_NAME.data()
 
@@ -1230,7 +1243,7 @@ class ACQ2106(MDSplus.Device):
                             # TODO: Make more accurate, possibly account for the time it took to read the segment, possibly use the SPAD
                             if first_recv:
                                 first_recv = False
-                                self.device.TRIG_TIME.record = time.time()
+                                self.device.TRIGGER.TIMESTAMP.record = time.time()
 
                             view = view[bytes_read:]
                             bytes_needed -= bytes_read
@@ -1399,7 +1412,7 @@ class ACQ2106(MDSplus.Device):
 
         # General Configuration
 
-        self.TRIG_SOURCE.record = str(self.TRIG_SOURCE.data()).upper()
+        self.TRIGGER.SOURCE.record = str(self.TRIGGER.SOURCE.data()).upper()
         self.SYNC_ROLE.record = str(self.SYNC_ROLE.data()).lower()
 
         # Mode-Specific Configuration
