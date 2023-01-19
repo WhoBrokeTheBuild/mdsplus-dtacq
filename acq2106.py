@@ -396,6 +396,7 @@ class ACQ2106(MDSplus.Device):
         {
             'path': ':TRIGGER:TIME_AT_0',
             'type': 'numeric',
+            'value': 0,
             'options': ('write_shot',),
             'ext_options': {
                 'tooltip': 'Time offset in seconds, used when building the Window(start, end, TIME_AT_0)',
@@ -485,9 +486,9 @@ class ACQ2106(MDSplus.Device):
         },
     ]
 
-    for i in range(3, _MAX_SPAD):
+    for _spad_index in range(3, _MAX_SPAD):
         _default_parts.append({
-            'path': ':SCRATCHPAD:SPAD%d' % (i,),
+            'path': ':SCRATCHPAD:SPAD%d' % (_spad_index,),
             'type': 'signal',
             'options': ('no_write_model',),
         })
@@ -609,6 +610,13 @@ class ACQ2106(MDSplus.Device):
             'ext_options': {
                 'tooltip': 'Comma-Separated list of messages that will trigger WRTT1.',
             },
+        },
+        # If we have White Rabbit, we can decode the TAI timestamps in SPAD1, SPAD2
+        {
+            'path': ':SCRATCHPAD:TIMESTAMPS',
+            'type': 'any',
+            'options': ('no_write_shot',),
+            'valueExpr': 'TdiCompile("ACQ2106_PARSE_SPAD_TIMESTAMPS($, $, $)", node.parent.SPAD1, node.parent.SPAD2, head.WR.NS_PER_TICK)'
         },
     ]
 
@@ -884,6 +892,9 @@ class ACQ2106(MDSplus.Device):
                 input_node.COEFFICIENT.record = coefficients[i]
                 input_node.OFFSET.record = offsets[i]
 
+    _SECONDS_TO_NANOSECONDS = 1_000_000_000
+    """One second in nanoseconds"""
+
     def _set_sync_role(self, uut):
 
         # Everything after the ; should not be trusted
@@ -932,11 +943,17 @@ class ACQ2106(MDSplus.Device):
             uut.s0.SIG_SRC_TRG_0 = trigger_source
         elif requested_arguments['TRG:DX'] == 'd1':
             uut.s0.SIG_SRC_TRG_1 = trigger_source
+        
+        # TODO: Check if this is even set
+        motherboard_clock_rate = float(uut.s0.SIG_CLK_MB_FREQ.split(' ')[1])
+        ns_per_tick = 1.0 / motherboard_clock_rate * self._SECONDS_TO_NANOSECONDS
+        
+        # This is done automatically at boot, but if you change the sync role while running, it needs to be recalculated
+        uut.cC.WRTD_TICKNS = ns_per_tick
 
-        # If we are configured for White Rabbit, query the Nanoseconds / Tick
         try:
             ns_per_tick_node = self.WR.NS_PER_TICK
-            ns_per_tick_node.record = float(uut.cC.WRTD_TICKNS)
+            ns_per_tick_node.record = float(ns_per_tick)
         except MDSplus.TreeNNF:
             pass
 
@@ -992,7 +1009,7 @@ class ACQ2106(MDSplus.Device):
         def run(self):
             try:
                 self.tree = MDSplus.Tree(self.tree_name, self.tree_shot)
-                self.device = self.tree.getPath(self.node_path)
+                self.device = self.tree.getNode(self.node_path)
 
                 uut = self.device._get_uut()
                 if uut is None:
@@ -1048,7 +1065,7 @@ class ACQ2106(MDSplus.Device):
         def run(self):
             try:
                 self.tree = MDSplus.Tree(self.tree_name, self.tree_shot)
-                self.device = self.tree.getPath(self.node_path)
+                self.device = self.tree.getNode(self.node_path)
 
                 uut = self.device._get_uut()
                 if uut is None:
@@ -1124,7 +1141,7 @@ class ACQ2106(MDSplus.Device):
                             input_delta_time = delta_time * software_decimations[i]
                             input_data = data_reshaped[:: software_decimations[i], i]
 
-                            begin = segment_index * segment_length * input_delta_time
+                            begin = (segment_index * segment_length * input_delta_time) + time_at_0
                             end = begin + ((segment_length - 1) * input_delta_time)
                             dim = MDSplus.Range(begin, end, input_delta_time)
 
@@ -1167,7 +1184,7 @@ class ACQ2106(MDSplus.Device):
 
             try:
                 self.tree = MDSplus.Tree(self.tree_name, self.tree_shot)
-                self.device = self.tree.getPath(self.node_path)
+                self.device = self.tree.getNode(self.node_path)
 
                 uut = self.device._get_uut()
                 if uut is None:
@@ -1219,7 +1236,7 @@ class ACQ2106(MDSplus.Device):
                 self.writer.setDaemon(True)
                 self.writer.start()
 
-                # When TRIG_SOURCE is set to STRIG, opening the socket will actually trigger the device, so we have to do this last
+                # When TRIGGER.SOURCE is set to STRIG, opening the socket will actually trigger the device, so we have to do this last
                 self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.socket.settimeout(6) # TODO: Investigate making this configurable or something
                 self.socket.connect((self.device.ADDRESS.data(), acq400_hapi.AcqPorts.STREAM))
@@ -1542,7 +1559,7 @@ class ACQ2106(MDSplus.Device):
                     print(f"No module assumed to be in site {site}")
 
             # TODO: Approximate uut.data_size()
-            # data_size =
+            data_size = 4
 
             # TODO: Approximate uut.get_aggregator_sites
             # aggregator_sites =
@@ -1704,6 +1721,9 @@ class ACQ2106(MDSplus.Device):
             raise Exception('The modules in the device have changed since the last call to configure(). You must run configure() again.')
 
         # Verify the values of all nodes
+        
+        if self.HARD_DECIM.data() > 16 and self.FREQUENCY.data() < 10000:
+            self._log_warning('Using Hardware Decimation > 16 with a Frequency of < 10000 will cause data loss.')
 
         for node in self.getNodeWild('***'):
             self._log_verbose(f"Verifying configuration for {node.path}")
@@ -1828,7 +1848,10 @@ class ACQ2106(MDSplus.Device):
 
             # HACK: Part of a hack to circumvent XNCI's from destroying data
             # Can be removed after https://github.com/MDSplus/mdsplus/pull/2498 is merged
-            data = node.getDataNoRaise()
+            try:
+                data = node.getDataNoRaise()
+            except MDSplus.TreeBADRECORD:
+                pass
 
             if 'ext_options' in part:
                 # HACK: If no_write_model is set, you are unable to set XNCIs, so we temporarily disable it
@@ -1897,32 +1920,6 @@ class ACQ2106(MDSplus.Device):
                 dictionary[pair] = None
         return dictionary
 
-    _SECONDS_TO_NANOSECONDS = 1_000_000_000
-    """One second in nanoseconds"""
-
-    # NOTE: Update when this value is changed globally
-    _TAI_TO_UTC_OFFSET_NANOSECONDS = 37 * _SECONDS_TO_NANOSECONDS
-    """The offset needed to convert TAI timestamps to UTC and back"""
-
-    def _tai_to_utc(self, tai_timestamp):
-        """Convert nanosecond TAI timestamp to UTC"""
-        return tai_timestamp - self._TAI_TO_UTC_OFFSET_NANOSECONDS
-
-    def _utc_to_tai(self, utc_timestamp):
-        """Convert nanosecond UTC timestamp to TAI"""
-        return utc_timestamp + self._TAI_TO_UTC_OFFSET_NANOSECONDS
-
-    def _parse_spad_tai_timestamp(self, spad, ns_per_tick):
-        """Parse the nanosecond TAI timestamp stored in SPAD[1] and SPAD[2]"""
-
-        tai_seconds = np.uint32(spad[1])
-        tai_ticks = np.uint32(spad[2]) & 0x0FFFFFFF # The vernier
-        tai_nanoseconds = (tai_ticks * ns_per_tick)
-
-        # Calculate the TAI time in nanoseconds
-        tai_timestamp = (tai_seconds * self._SECONDS_TO_NANOSECONDS) + tai_nanoseconds
-        return int(tai_timestamp)
-
-
+    
 class ACQ1001(ACQ2106):
     _MAX_SITES = 1
