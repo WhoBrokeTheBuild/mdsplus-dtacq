@@ -108,9 +108,11 @@ class ACQ2106(MDSplus.Device):
 
     #### STREAM
 
-    Data will stream continuously, storing data in segments of `STREAM:SEG_LENGTH` samples until either the `stop_stream` method is called, or
+    # TODO: Explain SEGLEN_CONF -> SEGLEN_ACT
+
+    Data will stream continuously, storing data in segments of `STREAM:SEGLEN_ACT` samples until either the `stop_stream` method is called, or
     the number of segments reaches `STREAM:SEG_COUNT`. In order to allow enough time to write each segment to disk, try experimenting with the
-    value of `STREAM:SEG_LENGTH` until the writer thread is able to keep up. With `DEBUG_DEVICES >= 4` a message will be displayed every time
+    value of `STREAM:SEGLEN_CONF` until the writer thread is able to keep up. With `DEBUG_DEVICES >= 4` a message will be displayed every time
     the writer thread can't keep up, indicating that a new buffer was allocated. Every time a segment of data is written, an MDSplus Event with
     the name stored in `STREAM:EVENT_NAME` will be sent.
 
@@ -306,7 +308,7 @@ class ACQ2106(MDSplus.Device):
             'type': 'text',
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Comma-Separated list of modules, specified by model name or nothing if no module is present.',
+                'tooltip': 'Comma-Separated list of modules, specified by model name or nothing if no module is present. This is queried from the device if configuring online, or a required input if configuring offline.',
             },
         },
         {
@@ -314,7 +316,7 @@ class ACQ2106(MDSplus.Device):
             'type': 'text',
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'IP Address or DNS Name of the digitizer.',
+                'tooltip': 'IP Address or DNS Name of the digitizer. Leave this blank to configure offline.',
             },
         },
         {
@@ -416,14 +418,14 @@ class ACQ2106(MDSplus.Device):
             'path': ':TEMP',
             'type': 'signal',
             'ext_options': {
-                'tooltip': 'Temperature of the main board in celsius.',
+                'tooltip': 'Recorded temperature of the main board in Celsius.',
             },
         },
         {
             'path': ':TEMP_FPGA',
             'type': 'signal',
             'ext_options': {
-                'tooltip': 'Temperature of the FPGA in celsius.',
+                'tooltip': 'Recorded temperature of the FPGA in Celsius.',
             },
         },
         {
@@ -435,6 +437,9 @@ class ACQ2106(MDSplus.Device):
         {
             'path': ':DEFAULTS',
             'type': 'structure',
+            'ext_options': {
+                'tooltip': 'Contains defaults for settings that can be overridden per-input.',
+            },
         },
         {
             'path': ':DEFAULTS:SOFT_DECIM',
@@ -459,6 +464,9 @@ class ACQ2106(MDSplus.Device):
         {
             'path': ':SCRATCHPAD',
             'type': 'structure',
+            'ext_options': {
+                'tooltip': 'Contains the scratchpad (SPAD) metadata recorded alongside the data.',
+            },
         },
         {
             'path': ':SCRATCHPAD:SPAD0',
@@ -497,15 +505,31 @@ class ACQ2106(MDSplus.Device):
         {
             'path': ':STREAM',
             'type': 'structure',
+            'ext_options': {
+                'tooltip': 'Contains settings for use with MODE=STREAM.',
+            },
         },
         {
-            'path': ':STREAM:SEG_LENGTH',
+            'path': ':STREAM:SEGLEN_CONF',
             'type': 'numeric',
             'value': 8000,
-            'options': ('write_model', 'write_shot',),
+            'options': ('write_model',),
             'ext_options': {
-                'tooltip': 'Segment Length, number of samples to take before calling makeSegment().',
+                'tooltip': 'Configured Segment Length, the Actual Segment Length will be recorded in SEGLEN_ACT. '
+                    'This is the number of samples you want to take before calling makeSegment(). '
+                    'SEGLEN_ACT is computed from this number, but might increase to match a common divisor with all decimations. '
+                    'You can calculate the segments/sec as FREQUENCY/SEGLEN_ACT.',
                 'min': 1024,
+            },
+        },
+        {
+            'path': ':STREAM:SEGLEN_ACT',
+            'type': 'numeric',
+            'options': ('write_shot',),
+            'ext_options': {
+                'tooltip': 'Actual Segment Length, the number of samples to take before calling makeSegment(). '
+                    'This is computed from SEGLEN_CONF and possibly increased to match a common divisor with all decimations. '
+                    'You can calculate the segments/sec as FREQUENCY/SEGLEN_ACT.',
             },
         },
         {
@@ -533,6 +557,9 @@ class ACQ2106(MDSplus.Device):
         {
             'path': ':TRANSIENT',
             'type': 'structure',
+            'ext_options': {
+                'tooltip': 'Contains settings for use with MODE=TRANSIENT.',
+            },
         },
         {
             'path':':TRANSIENT:PRESAMPLES',
@@ -567,7 +594,10 @@ class ACQ2106(MDSplus.Device):
         {
             'path': ':WR',
             'type': 'structure',
-            'options': ('no_write_shot',)
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Contains settings for controlling WRTD and WRTT.',
+            },
         },
         {
             'path': ':WR:NS_PER_TICK',
@@ -694,7 +724,7 @@ class ACQ2106(MDSplus.Device):
                 'path': site_path + ':TEMP',
                 'type': 'signal',
                 'ext_options': {
-                    'tooltip': 'Temperature of the card in this site in celsius.',
+                    'tooltip': 'Recorded temperature of the card in this site in Celsius.',
                 },
             },
         ]
@@ -1219,7 +1249,7 @@ class ACQ2106(MDSplus.Device):
                     decimator = int(decimator * soft_decim / gcd(decimator, soft_decim))
                 self.device._log_info(f"Calculated a greatest common decimator of {decimator}")
 
-                self.segment_length = int(self.device.STREAM.SEG_LENGTH.data())
+                self.segment_length = int(self.device.STREAM.SEGLEN_CONF.data())
                 self.segment_count = int(self.device.STREAM.SEG_COUNT.data())
 
                 # If the decimator and segment length don't match, adjust the segment length
@@ -1228,7 +1258,7 @@ class ACQ2106(MDSplus.Device):
                     self.segment_length = (self.segment_length // decimator + 1) * decimator
                     self.device._log_info(f"Adjusting segment length to match lowest common decimator, {old_segment_length} -> {self.segment_length}")
 
-                    self.device.STREAM.SEG_LENGTH.record = self.segment_length
+                    self.device.STREAM.SEGLEN_ACT.record = self.segment_length
 
                 self.segment_size = self.segment_length * bytes_per_row
 
@@ -1267,6 +1297,7 @@ class ACQ2106(MDSplus.Device):
 
                     except socket.timeout:
                         self.device._log_warning("Socket connection timed out, retrying")
+                        self.empty_buffer_queue.put(buffer)
                         continue
 
                     except socket.error:
