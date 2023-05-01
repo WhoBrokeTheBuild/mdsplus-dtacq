@@ -411,7 +411,7 @@ class ACQ2106(MDSplus.Device):
             'value': 'EXT',
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Options will decided if the timing highway is d0 or d1. For a soft trigger use STRIG, and for a hard trigger use EXT.',
+                'tooltip': 'Trigger source. These options will decide if the timing highway is d0 or d1. For a soft trigger use STRIG, and for a hard trigger use EXT.',
                 'values': _TRIGGER_SOURCE_D0_OPTIONS + _TRIGGER_SOURCE_D1_OPTIONS,
             },
         },
@@ -561,7 +561,7 @@ class ACQ2106(MDSplus.Device):
             'path': ':TRANSIENT',
             'type': 'structure',
             'ext_options': {
-                'tooltip': 'Contains settings for use when MODE=TRANSIENT.',
+                'tooltip': 'Contains settings for use with MODE=TRANSIENT.',
             },
         },
         {
@@ -607,7 +607,7 @@ class ACQ2106(MDSplus.Device):
             'type': 'numeric',
             'options': ('no_write_model',),
             'ext_options': {
-                'tooltip': 'Nanoseconds per tick of the clock, which is queried from the digitizer.',
+                'tooltip': 'The number of nanoseconds per tick of the clock, which is queried from the digitizer.',
             },
         },
         {
@@ -807,7 +807,7 @@ class ACQ2106(MDSplus.Device):
                             'valueExpr': 'head.DEFAULTS.SC_GAIN1',
                             'options':('no_write_shot',),
                             'ext_options': {
-                                'tooltip': 'Signal conditioning gain #1 for this input, which is applied before the offset (SC_OFFSET).',
+                                'tooltip': 'Default signal conditioning gain #1 for this input, which is applied before the offset (SC_OFFSET).',
                                 'values': [ 1, 10, 100, 1000 ],
                             },
                         },
