@@ -308,7 +308,8 @@ class ACQ2106(MDSplus.Device):
             'type': 'text',
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Comma-Separated list of modules, specified by model name or nothing if no module is present. This is queried from the device if configuring online, or a required input if configuring offline.',
+                'tooltip': 'Comma-separated list of modules, specified by model name, or nothing if no module is present.'
+                  'This is queried from the device if configuring online, or is a required input if configuring offline.',
             },
         },
         {
@@ -316,7 +317,7 @@ class ACQ2106(MDSplus.Device):
             'type': 'text',
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'IP Address or DNS Name of the digitizer. Leave this blank to configure offline.',
+                'tooltip': 'IP address or DNS name of the digitizer. Leave this blank to configure offline.',
             },
         },
         {
@@ -324,7 +325,7 @@ class ACQ2106(MDSplus.Device):
             'type': 'text',
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'EPICS Name of the digitizer, usually the Hostname in the form of acq2106_xyz.',
+                'tooltip': 'EPICS name of the digitizer, usually the hostname in the form of acq2106_xyz.',
             },
         },
     ]
@@ -352,7 +353,7 @@ class ACQ2106(MDSplus.Device):
             'type': 'text',
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'FPGA Image version of the ACQ2106, queried during configure().',
+                'tooltip': 'FPGA image version of the ACQ2106, queried during configure().',
             },
         },
         {
@@ -371,7 +372,7 @@ class ACQ2106(MDSplus.Device):
             'value': 20000,
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Sample Frequency in Hertz',
+                'tooltip': 'Sample frequency in Hertz.',
             },
         },
         {
@@ -380,7 +381,7 @@ class ACQ2106(MDSplus.Device):
             # 'on': False,
             'options': ('no_write_model',),
             'ext_options': {
-                'tooltip': 'On if running, Off otherwise.',
+                'tooltip': 'On if running, or Off otherwise.',
             },
         },
         {
@@ -410,7 +411,7 @@ class ACQ2106(MDSplus.Device):
             'value': 'EXT',
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Trigger Source, options will decided if the timing highway is d0 or d1. For a soft trigger use STRIG, and for a hard trigger use EXT.',
+                'tooltip': 'Trigger source. These options will decide if the timing highway is d0 or d1. For a soft trigger use STRIG, and for a hard trigger use EXT.',
                 'values': _TRIGGER_SOURCE_D0_OPTIONS + _TRIGGER_SOURCE_D1_OPTIONS,
             },
         },
@@ -447,7 +448,8 @@ class ACQ2106(MDSplus.Device):
             'value': 1,
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Default Software Decimation, can be overridden per-input. Computed on the server by discarding every N-1 samples. 1 = Disabled.',
+                'tooltip': 'Default software decimation, which can be overridden per-input. Computed on the server by discarding every N-1 samples.'
+                    'Set to 1 to disable.',
                 'min': 1,
             },
         },
@@ -457,7 +459,7 @@ class ACQ2106(MDSplus.Device):
             'value': 100,
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Default Factor for Resampling, can be overridden per-input. 1 = Disabled.',
+                'tooltip': 'Default factor for resampling, which can be overridden per-input. Set to 1 to disable.',
                 'min': 1,
             },
         },
@@ -481,7 +483,7 @@ class ACQ2106(MDSplus.Device):
             'type': 'signal',
             'options': ('no_write_model',),
             'ext_options': {
-                'tooltip': 'If present, this scratchpad field will part of the TAI timestamp.',
+                'tooltip': 'If present, this scratchpad field will contain part of the TAI timestamp.',
             },
         },
         {
@@ -489,7 +491,7 @@ class ACQ2106(MDSplus.Device):
             'type': 'signal',
             'options': ('no_write_model',),
             'ext_options': {
-                'tooltip': 'If present, this scratchpad field will part of the TAI timestamp.',
+                'tooltip': 'If present, this scratchpad field will contain part of the TAI timestamp.',
             },
         },
     ]
@@ -515,10 +517,10 @@ class ACQ2106(MDSplus.Device):
             'value': 8000,
             'options': ('write_model',),
             'ext_options': {
-                'tooltip': 'Configured Segment Length, the Actual Segment Length will be recorded in SEGLEN_ACT. '
-                    'This is the number of samples you want to take before calling makeSegment(). '
-                    'SEGLEN_ACT is computed from this number, but might increase to match a common divisor with all decimations. '
-                    'You can calculate the segments/sec as FREQUENCY/SEGLEN_ACT.',
+                'tooltip': 'Configured segment length. The actual segment length will be recorded in SEGLEN_ACT.'
+                    'This is the number of samples configured to be taken before calling makeSegment().'
+                    'SEGLEN_ACT is computed from this number, but might increase to match a common divisor with all decimations.'
+                    'Segments taken per second can be calculated as FREQUENCY/SEGLEN_ACT.',
                 'min': 1024,
             },
         },
@@ -527,9 +529,9 @@ class ACQ2106(MDSplus.Device):
             'type': 'numeric',
             'options': ('write_shot',),
             'ext_options': {
-                'tooltip': 'Actual Segment Length, the number of samples to take before calling makeSegment(). '
+                'tooltip': 'Actual segment length. This is the number of samples that will actually be taken before calling makeSegment().'
                     'This is computed from SEGLEN_CONF and possibly increased to match a common divisor with all decimations. '
-                    'You can calculate the segments/sec as FREQUENCY/SEGLEN_ACT.',
+                    'Segments taken per second can be calculated as FREQUENCY/SEGLEN_ACT.',
             },
         },
         {
@@ -538,7 +540,8 @@ class ACQ2106(MDSplus.Device):
             'value': 1000,
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Segment Count, number of segments to capture before stopping. This will need to be a common denominator of all the decimations. If not, it will be automatically adjusted and updated in the tree.',
+                'tooltip': 'Segment count. This is the number of segments that will be captured before stopping.'
+                    'This will need to be a common denominator of all decimations. If not, it will be automatically adjusted and updated in the tree.',
                 'min': 1,
             },
         },
@@ -567,7 +570,7 @@ class ACQ2106(MDSplus.Device):
             'value': 10000,
             'options':('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Number of samples to capture before the trigger.',
+                'tooltip': 'Number of samples that will be captured before the trigger.',
             },
         },
         {
@@ -576,7 +579,7 @@ class ACQ2106(MDSplus.Device):
             'value': 10000,
             'options':('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Number of samples to capture after the trigger.',
+                'tooltip': 'Number of samples that will be captured after the trigger.',
             },
         },
         {
@@ -604,7 +607,7 @@ class ACQ2106(MDSplus.Device):
             'type': 'numeric',
             'options': ('no_write_model',),
             'ext_options': {
-                'tooltip': 'The nanoseconds per tick of the clock, queried from the digitizer.',
+                'tooltip': 'The number of nanoseconds per tick of the clock, which is queried from the digitizer.',
             },
         },
         {
@@ -621,7 +624,7 @@ class ACQ2106(MDSplus.Device):
             'value': 50000000,
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Time in nanoseconds between when the WR message is sent, and when the trigger it describes should happen.',
+                'tooltip': 'Time in nanoseconds between when the WR message is sent and when the trigger it describes should happen.',
                 'min': 50000000,
             },
         },
@@ -630,7 +633,7 @@ class ACQ2106(MDSplus.Device):
             'type': 'text',
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Comma-Separated list of messages that will trigger WRTT0.',
+                'tooltip': 'Comma-separated list of messages that will trigger WRTT0.',
             },
         },
         {
@@ -638,7 +641,7 @@ class ACQ2106(MDSplus.Device):
             'type': 'text',
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Comma-Separated list of messages that will trigger WRTT1.',
+                'tooltip': 'Comma-separated list of messages that will trigger WRTT1.',
             },
         },
         # If we have White Rabbit, we can decode the TAI timestamps in SPAD1, SPAD2
@@ -657,7 +660,7 @@ class ACQ2106(MDSplus.Device):
             'value': 1,
             'options':('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Default Signal Conditioning Gain #1, applied before SC_OFFSET, can be overridden per-input.',
+                'tooltip': 'Default signal conditioning gain #1, applied before the offset (SC_OFFSET). Can be overridden per-input.',
                 'values': [ 1, 10, 100, 1000 ],
             },
         },
@@ -667,7 +670,7 @@ class ACQ2106(MDSplus.Device):
             'value': 1,
             'options':('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Default Signal Conditioning Gain #2, applied after SC_OFFSET, can be overridden per-input.',
+                'tooltip': 'Default signal conditioning gain #2, applied after the offset (SC_OFFSET). Can be overridden per-input.',
                 'values': [ 1, 2, 5, 10 ],
             },
         },
@@ -677,7 +680,8 @@ class ACQ2106(MDSplus.Device):
             'value': 0,
             'options':('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Default Signal Conditioning Offset, applied in-between SC_GAIN1 and SC_GAIN2, can be overridden per-input.',
+                'tooltip': 'Default signal conditioning offset, which is applied after the first gain (SC_GAIN1) and before the second gain (SC_GAIN2). '
+                    'Can be overridden per-input.',
                 'min': -2.5,
                 'max': 2.5,
             },
@@ -691,7 +695,7 @@ class ACQ2106(MDSplus.Device):
             'value': 1,
             'options': ('no_write_shot',),
             'ext_options': {
-                'tooltip': 'Hardware Decimation (NACC). Computed on the digitizer by averaging every N samples together. 1 = Disabled.',
+                'tooltip': 'Hardware decimation (NACC). Computed on the digitizer by averaging every N samples together. Set to 1 to disable.',
                 'min': 1,
                 'max': 32,
             },
@@ -717,7 +721,7 @@ class ACQ2106(MDSplus.Device):
                 'path': site_path + ':SERIAL',
                 'type': 'text',
                 'ext_options': {
-                    'tooltip': 'Serial Number of the card in this site.',
+                    'tooltip': 'Serial number of the card in this site.',
                 },
             },
             {
@@ -751,7 +755,7 @@ class ACQ2106(MDSplus.Device):
                         'type': 'numeric',
                         'valueExpr': 'head.DEFAULTS.RES_FACTOR',
                         'ext_options': {
-                            'tooltip': 'Factor for Resampling for this input. 1 = Disabled.',
+                            'tooltip': 'Factor for resampling for this input. Set to 1 to disable.',
                             'min': 1,
                         },
                     },
@@ -761,7 +765,7 @@ class ACQ2106(MDSplus.Device):
                         'valueExpr': 'head.DEFAULTS.SOFT_DECIM',
                         'options':('no_write_shot',),
                         'ext_options': {
-                            'tooltip': 'Software Decimation for this input. Computed on the server by discarding every N-1 samples. 1 = Disabled.',
+                            'tooltip': 'Software decimation for this input, which is computed on the server by discarding every N-1 samples. Set to 1 to disable.',
                             'min': 1,
                         },
                     },
@@ -803,7 +807,7 @@ class ACQ2106(MDSplus.Device):
                             'valueExpr': 'head.DEFAULTS.SC_GAIN1',
                             'options':('no_write_shot',),
                             'ext_options': {
-                                'tooltip': 'Signal Conditioning Gain #1 for this input, applied before the Offset.',
+                                'tooltip': 'Default signal conditioning gain #1 for this input, which is applied before the offset (SC_OFFSET).',
                                 'values': [ 1, 10, 100, 1000 ],
                             },
                         },
@@ -813,7 +817,7 @@ class ACQ2106(MDSplus.Device):
                             'valueExpr': 'head.DEFAULTS.SC_GAIN2',
                             'options':('no_write_shot',),
                             'ext_options': {
-                                'tooltip': 'Signal Conditioning Gain #2 for this input, applied after the Offset.',
+                                'tooltip': 'Signal conditioning gain #2 for this input, which is applied after the offset (SC_OFFSET).',
                                 'values': [ 1, 2, 5, 10 ],
                             },
                         },
@@ -823,7 +827,7 @@ class ACQ2106(MDSplus.Device):
                             'valueExpr': 'head.DEFAULTS.SC_OFFSET',
                             'options':('no_write_shot',),
                             'ext_options': {
-                                'tooltip': 'Signal Conditioning Offset for this input, applied in-between Gain #1 and Gain #2.',
+                                'tooltip': 'Signal conditioning offset for this input, which is applied after the first gain (SC_GAIN1) and before the second gain (SC_GAIN2).',
                                 'min': -2.5,
                                 'max': 2.5,
                             },
