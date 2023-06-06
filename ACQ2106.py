@@ -687,6 +687,37 @@ class ACQ2106(MDSplus.Device):
             },
         },
     ]
+    
+    _dio_td_parts = [
+        {
+            'path': ':DIO_SITE',
+            'type': 'numeric',
+            'value': int(5), 
+            'options':('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Contains ',
+            },
+        }, 
+        {
+            'path':':STL',         
+            'type':'text',     
+            'options':('write_shot',),
+            'ext_options': {
+                'tooltip': 'Contains ',
+            },
+        },
+        {
+            'path':':GPG_TRG_DX',  
+            'type':'text',     
+            'value': 'dx', 
+            'options':('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Contains ',
+            },
+        },
+
+    ]
+    
 
     _32bit_parts = [
         {
@@ -848,6 +879,18 @@ class ACQ2106(MDSplus.Device):
         elif model == 'DIO482ELF':
             pass
 
+        elif model == 'DIO482ELF_TD':
+            for i in range(4):
+                parts += [
+                    {
+                        'path': ':SITE%d:OUTPUT_%02d' % (site, i + 1,),
+                        'type': 'signal',
+                        'ext_options': {
+                            'tooltip': 'Data for this ',
+                        },
+                    },
+                ]
+
         else:
             raise Exception('Unknown module %s in site %d' % (model, site,))
 
@@ -909,6 +952,14 @@ class ACQ2106(MDSplus.Device):
         self._get_calibration(uut)
         self._set_sync_role(uut)
         self._set_hardware_decimation(uut)
+        
+        if self.MODE.data().upper() == 'TRANSIENT':
+            self.arm_transient()
+        
+        #if has_tiga:
+        has_tiga = (uut.s0.is_tiga != 'none')
+        if has_tiga:
+            self._set_pg_triggers(uut)
 
     def _get_calibration(self, uut):
         # In order to get the calibration per-site, we cannot use uut.fetch_all_calibration()
@@ -1030,6 +1081,157 @@ class ACQ2106(MDSplus.Device):
 
             pv = epics.PV(epics_prefix + 'GAIN:COMMIT')
             pv.put('1')
+
+    ###
+    ### Pulse Generator Methods
+    ###
+
+    def _get_pg_slot(self, uut):
+        site_number  = int(self.dio_site.data())
+        # Verify site_number is a valid int between 1 and 6
+        # if site_number in range(1, 7):
+        #     self.slot = uut.__getattr__('s' + self.dio_site.data())
+        try:
+            if site_number   == 0: 
+                slot = uut.s0    # Only for a GPG system.
+            elif site_number == 1:
+                slot = uut.s1
+            elif site_number == 2:
+                slot = uut.s2
+            elif site_number == 3:
+                slot = uut.s3
+            elif site_number == 4:
+                slot = uut.s4
+            elif site_number == 5:
+                slot = uut.s5
+            elif site_number == 6:
+                slot = uut.s6
+        except:
+            pass
+        
+        return slot
+
+    def _is_pg(self, uut):
+        slot = self._get_pg_slot(uut)
+
+        site = self.dio_site.data()
+        
+        try:
+            if site == 0:
+                is_pg = False
+            else:
+                is_pg = slot.GPG_ENABLE is not None
+        except:
+            is_pg = False
+
+        return is_pg
+
+    def _set_pg_triggers(self, uut):
+        slot = self._get_pg_slot(uut)
+        
+        slot.GPG_ENABLE = 1
+        slot.GPG_MODE   = 'LOOP'
+
+        if self.isPG():
+            slot.TRG        = 'enable'
+            slot.TRG_DX     = str(self.gpg_trg_dx.data())
+            slot.TRG_SENSE  = 'rising'
+        else:
+            slot.GPG_TRG        = 'enable'
+            slot.GPG_TRG_DX     = str(self.gpg_trg_dx.data())
+            slot.GPG_TRG_SENSE  = 'rising'
+      
+
+    def _upload_stl(self, uut):
+        # Pair of (transition time, 32 bit channel states):
+        stl = str(self.stl.data())
+        
+        is_debug = (self.debug > 0)
+                
+        #What follows checks if the system is a GPG module (site 0) or a PG module (site 1..6)
+        if self._is_pg():
+            uut.load_dio482pg(self.dio_site.data(), stl, is_debug)
+        else:
+            uut.load_wrpg(stl, is_debug)
+    
+    def _set_stl(self, nchan):
+        import numpy
+        data_by_chan = []
+        all_times = []
+
+        for i in range(nchan):
+            c = self.__getattr__('OUTPUT_%3.3d' % (i + 1))
+
+            times = c.dim_of().data()
+            data = c.data()
+
+            # Build dictionary of times -> states
+            data_dict = { k: v for k, v in zip(times, data) }
+
+            data_by_chan.append(data_dict)
+            all_times.extend(times)
+
+        all_times = sorted(list(set(all_times)))
+
+        # initialize the state matrix
+        state_matrix = numpy.zeros((len(all_times), nchan), dtype='int')
+                
+        for c, data in enumerate(data_by_chan):
+            for t, time in enumerate(all_times):
+                if time in data:
+                    state_matrix[t][c] = data[time]
+                else:
+                    state_matrix[t][c] = state_matrix[t - 1][c]
+
+        # Building the string of 1s and 0s for each transition time:
+        binary_rows = []
+        times_usecs = []
+        last_row = None
+        for time, row in zip(all_times, state_matrix):
+            if not numpy.array_equal(row, last_row):
+                rowstr = [ str(i) for i in numpy.flip(row) ]  # flipping the bits so that chan 1 is in the far right position
+                binary_rows.append(''.join(rowstr))
+                times_usecs.append(int(time * 1E7)) # Converting the original units of the transtion times in seconds, to 1/10th micro-seconds
+                last_row = row
+
+        # TODO: depending on the hardware there is a limit number of states allowed. 
+        # The lines below limits the number of the CMOD's 1800 states table to just 510:
+        # binary_rows = binary_rows[0:510]
+        # times_usecs = times_usecs[0:510]
+        
+        # Write to a list with states in HEX form.
+        stl  = ''
+        for time, state in zip(times_usecs, binary_rows):
+            stl += '%d,%08X\n' % (time, int(state, 2))
+        
+        self.stl.record = stl
+
+
+    def arm_pg(self, uut):
+        slot = self._get_pg_slot(uut)
+
+        # TIGA: PG nchans = 4, or non-TIGA PG nchans = 32
+        tiga    = '7B'
+        nontiga = '6B'
+
+        site = self.dio_site.data()
+        if site == 0 or slot.MTYPE in nontiga:
+            nchans = 32
+            if self.debug >= 2:
+                self.dprint(2, 'DIO site and Number of Channels: {} {}'.format(self.dio_site.data(), nchans))
+        elif slot.MTYPE in tiga:
+            nchans = 4            
+            if self.debug >= 2:
+                self.dprint(2, 'DIO site and Number of Channels: {} {}'.format(self.dio_site.data(), nchans))
+        
+        # Create the STL table:
+        self._set_stl(nchans)
+
+        #Load the STL into the DIO or GPG module.
+        self._upload_stl(uut)
+        
+        self.dprint(1, 'ACQ WRPG has loaded the STL. Waiting for trigger.')
+        
 
     class Monitor(threading.Thread):
         """Monitor thread for recording device temperature and voltage"""
@@ -1515,7 +1717,7 @@ class ACQ2106(MDSplus.Device):
             online = False
 
         # Online/Offline Configuration and Module-Specific Configuration
-
+        has_tiga = False
         has_wr = False
         has_hudp = False
         data_size = 0
@@ -1560,6 +1762,10 @@ class ACQ2106(MDSplus.Device):
 
             # TODO: has_hudp
             # TODO: has_tiga
+            has_tiga = (uut.s0.is_tiga != 'none')
+            if has_tiga:
+                self._log_info('Detected Timing Generator Appliance (TIGA) capabilities')
+
 
             aggregator_sites = list(map(int, uut.get_aggregator_sites()))
 
@@ -1575,6 +1781,10 @@ class ACQ2106(MDSplus.Device):
 
             if 'has_sc' in kwargs and self._to_bool(kwargs['has_sc']):
                 self._log_info('Assuming Signal Conditioning capabilities')
+                has_sc = True
+                
+            if 'has_tiga' in kwargs and self._to_bool(kwargs['has_tiga']):
+                self._log_info('Assuming Timing Generator Appliance (TIGA) capabilities')
                 has_sc = True
 
             modules = self.MODULES.getDataNoRaise()
@@ -1617,9 +1827,8 @@ class ACQ2106(MDSplus.Device):
         ### TIGA Nodes
         ###
 
-        has_tiga = False
         if has_tiga:
-            pass
+            self._add_parts(self._dio_td_parts, overwrite_data)
 
         ###
         ### HUDP Nodes
@@ -1757,8 +1966,8 @@ class ACQ2106(MDSplus.Device):
 
         # Verify the values of all nodes
         
-        if self.HARD_DECIM.data() > 16 and self.FREQUENCY.data() < 10000:
-            self._log_warning('Using Hardware Decimation > 16 with a Frequency of < 10000 will cause data loss.')
+        # if self.HARD_DECIM.data() > 16 and self.FREQUENCY.data() < 10000:
+        #     self._log_warning('Using Hardware Decimation > 16 with a Frequency of < 10000 will cause data loss.')
 
         for node in self.getNodeWild('***'):
             self._log_verbose(f"Verifying configuration for {node.path}")
