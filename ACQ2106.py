@@ -953,13 +953,7 @@ class ACQ2106(MDSplus.Device):
         self._set_sync_role(uut)
         self._set_hardware_decimation(uut)
         
-        if self.MODE.data().upper() == 'TRANSIENT':
-            self.arm_transient()
-        
-        #if has_tiga:
-        has_tiga = (uut.s0.is_tiga != 'none')
-        if has_tiga:
-            self._set_pg_triggers(uut)
+    
 
     def _get_calibration(self, uut):
         # In order to get the calibration per-site, we cannot use uut.fetch_all_calibration()
@@ -1205,32 +1199,6 @@ class ACQ2106(MDSplus.Device):
             stl += '%d,%08X\n' % (time, int(state, 2))
         
         self.stl.record = stl
-
-
-    def arm_pg(self, uut):
-        slot = self._get_pg_slot(uut)
-
-        # TIGA: PG nchans = 4, or non-TIGA PG nchans = 32
-        tiga    = '7B'
-        nontiga = '6B'
-
-        site = self.dio_site.data()
-        if site == 0 or slot.MTYPE in nontiga:
-            nchans = 32
-            if self.debug >= 2:
-                self.dprint(2, 'DIO site and Number of Channels: {} {}'.format(self.dio_site.data(), nchans))
-        elif slot.MTYPE in tiga:
-            nchans = 4            
-            if self.debug >= 2:
-                self.dprint(2, 'DIO site and Number of Channels: {} {}'.format(self.dio_site.data(), nchans))
-        
-        # Create the STL table:
-        self._set_stl(nchans)
-
-        #Load the STL into the DIO or GPG module.
-        self._upload_stl(uut)
-        
-        self.dprint(1, 'ACQ WRPG has loaded the STL. Waiting for trigger.')
         
 
     class Monitor(threading.Thread):
@@ -1599,9 +1567,8 @@ class ACQ2106(MDSplus.Device):
         monitor.setDaemon(True)
         monitor.start()
 
-
-
     ARM_TRANSIENT = arm_transient
+
 
     def store_transient(self):
         if self.MODE.data().upper() != 'TRANSIENT':
@@ -1617,6 +1584,45 @@ class ACQ2106(MDSplus.Device):
         pass
 
     SOFT_TRIGGER = soft_trigger
+    
+    
+    ###
+    ### DIO/PG Methods
+    ###   
+    
+    def arm_dio(self):
+        
+        uut = self._get_uut()
+        if uut is None:
+            raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
+        
+        slot = self._get_pg_slot(uut)
+
+        self._set_pg_triggers(uut)
+
+        # TIGA: PG nchans = 4, or non-TIGA PG nchans = 32
+        tiga    = '7B'
+        nontiga = '6B'
+
+        site = self.dio_site.data()
+        if site == 0 or slot.MTYPE in nontiga:
+            nchans = 32
+            if self.debug >= 2:
+                self.dprint(2, 'DIO site and Number of Channels: {} {}'.format(self.dio_site.data(), nchans))
+        elif slot.MTYPE in tiga:
+            nchans = 4            
+            if self.debug >= 2:
+                self.dprint(2, 'DIO site and Number of Channels: {} {}'.format(self.dio_site.data(), nchans))
+        
+        # Create the STL table:
+        self._set_stl(nchans)
+
+        #Load the STL into the DIO or GPG module.
+        self._upload_stl(uut)
+        
+        self.dprint(1, 'ACQ WRPG has loaded the STL. Waiting for trigger.')
+
+    ARM_DIO = arm_dio    
 
     def get_state(self):
         uut = self._get_uut()
