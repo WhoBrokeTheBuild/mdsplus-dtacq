@@ -263,6 +263,16 @@ class ACQ2106(MDSplus.Device):
     * WRTT1: White Rabbit Trigger
     """
 
+    _TRIGGER_SOURCE_WR_OPTIONS = [
+        'FPTRG',
+        'HDMI',
+    ]
+    """
+    Trigger Source options for WRTD
+    * FPTRG: Front Panel Trigger port
+    * HDMI: HDMI Trigger
+    """
+
     _SYNC_ROLE_OPTIONS = [
         'master',
         'slave',
@@ -644,6 +654,34 @@ class ACQ2106(MDSplus.Device):
                 'tooltip': 'Comma-separated list of messages that will trigger WRTT1.',
             },
         },
+        {
+            'path': ':WR:RX_ENABLE',
+            'type': 'numeric',
+            'value': 1,
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Turn on receiver.',
+            },
+        },
+        {
+            'path': ':WR:TX_ENABLE',
+            'type': 'numeric',
+            'value': 1,
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Turn on transmitter.',
+            },
+        },
+        {
+            'path': ':TRIGGER:WRTD_SOURCE',
+            'type': 'text',
+            'value': 'FPTRG',
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Source of the trigger: FPTRG.',
+                'values': _TRIGGER_SOURCE_WR_OPTIONS,
+            },
+        },
         # If we have White Rabbit, we can decode the TAI timestamps in SPAD1, SPAD2
         {
             'path': ':SCRATCHPAD:TIMESTAMPS',
@@ -687,37 +725,6 @@ class ACQ2106(MDSplus.Device):
             },
         },
     ]
-    
-    _dio_td_parts = [
-        {
-            'path': ':DIO_SITE',
-            'type': 'numeric',
-            'value': int(5), 
-            'options':('no_write_shot',),
-            'ext_options': {
-                'tooltip': 'Contains ',
-            },
-        }, 
-        {
-            'path':':STL',         
-            'type':'text',     
-            'options':('write_shot',),
-            'ext_options': {
-                'tooltip': 'Contains ',
-            },
-        },
-        {
-            'path':':GPG_TRG_DX',  
-            'type':'text',     
-            'value': 'dx', 
-            'options':('no_write_shot',),
-            'ext_options': {
-                'tooltip': 'Contains ',
-            },
-        },
-
-    ]
-    
 
     _32bit_parts = [
         {
@@ -880,6 +887,27 @@ class ACQ2106(MDSplus.Device):
             pass
 
         elif model == 'DIO482ELF_TD':
+            parts += [
+                {
+                    'path': ':SITE%d:TX_MESSAGE' % (site,), # TODO: Better name
+                    'type': 'text',
+                    'options': ('no_write_shot',),
+                    'ext_options': {
+                        'tooltip': 'Message to send with WR when triggered.',
+                    },
+                },
+                {
+                    'path': ':SITE%d:WRTD_SOURCE' % (site,), # TODO: Better name
+                    'type': 'text',
+                    'value': 'FPTRG',
+                    'options': ('no_write_shot',),
+                    'ext_options': {
+                        'tooltip': 'Source of the trigger: FPTRG.',
+                        'values': self._TRIGGER_SOURCE_WR_OPTIONS,
+                    },
+                },
+            ]
+
             for i in range(4):
                 parts += [
                     {
@@ -930,10 +958,11 @@ class ACQ2106(MDSplus.Device):
     #     """)
     # HELP = help
 
-    def setup(self):
-        ds = DeviceSetup(self)
-        ds.run()
-    SETUP = setup
+    # TODO:
+    # def setup(self):
+    #     ds = DeviceSetup(self)
+    #     ds.run()
+    # SETUP = setup
 
     def _init(self, uut):
         # TODO: Put all the startup shit here
@@ -952,8 +981,7 @@ class ACQ2106(MDSplus.Device):
         self._get_calibration(uut)
         self._set_sync_role(uut)
         self._set_hardware_decimation(uut)
-        
-    
+        self._setup_wr(uut)
 
     def _get_calibration(self, uut):
         # In order to get the calibration per-site, we cannot use uut.fetch_all_calibration()
@@ -1022,19 +1050,6 @@ class ACQ2106(MDSplus.Device):
             uut.s0.SIG_SRC_TRG_0 = trigger_source
         elif requested_arguments['TRG:DX'] == 'd1':
             uut.s0.SIG_SRC_TRG_1 = trigger_source
-        
-        # TODO: Check if this is even set
-        motherboard_clock_rate = float(uut.s0.SIG_CLK_MB_FREQ.split(' ')[1])
-        ns_per_tick = 1.0 / motherboard_clock_rate * self._SECONDS_TO_NANOSECONDS
-        
-        # This is done automatically at boot, but if you change the sync role while running, it needs to be recalculated
-        uut.cC.WRTD_TICKNS = ns_per_tick
-
-        try:
-            ns_per_tick_node = self.WR.NS_PER_TICK
-            ns_per_tick_node.record = float(ns_per_tick)
-        except MDSplus.TreeNNF:
-            pass
 
     def _set_hardware_decimation(self, uut):
         # HARD_DECIM only exists for 32-bit modules
@@ -1044,6 +1059,31 @@ class ACQ2106(MDSplus.Device):
 
             for _, client in uut.modules.items():
                 client.nacc = decimation
+
+        except MDSplus.TreeNNF:
+            pass
+
+    def _setup_wr(self, uut):
+
+       # TODO: Check if this is even set
+        motherboard_clock_rate = float(uut.s0.SIG_CLK_MB_FREQ.split(' ')[1])
+        ns_per_tick = 1.0 / motherboard_clock_rate * self._SECONDS_TO_NANOSECONDS
+
+        # This is done automatically at boot, but if you change the sync role while running, it needs to be recalculated
+        uut.cC.WRTD_TICKNS = ns_per_tick
+
+        try:
+            ns_per_tick_node = self.WR.NS_PER_TICK
+            ns_per_tick_node.record = float(ns_per_tick)
+
+            uut.cC.WRTD_RX = int(self.WR.RX_ENABLE.on)
+            uut.cC.WRTD_TX = int(self.WR.TX_ENABLE.on)
+
+            uut.cC.WRTD_RX_MATCHES = str(self.WR.RX0_FILTER.data())
+            uut.cC.WRTD_RX_MATCHES1 = str(self.WR.RX1_FILTER.data())
+
+            uut.cC.wrtd_commit_rx = 1
+            uut.cC.wrtd_commit_tx = 1
 
         except MDSplus.TreeNNF:
             pass
@@ -1076,130 +1116,96 @@ class ACQ2106(MDSplus.Device):
             pv = epics.PV(epics_prefix + 'GAIN:COMMIT')
             pv.put('1')
 
-    ###
-    ### Pulse Generator Methods
-    ###
+    def _setup_pulse_generators(self, uut):
+        _DIO_MODELS = ['DIO482ELF', 'DIO482ELF_TD']
 
-    def _get_pg_slot(self, uut):
-        site_number  = int(self.dio_site.data())
-        # Verify site_number is a valid int between 1 and 6
-        # if site_number in range(1, 7):
-        #     self.slot = uut.__getattr__('s' + self.dio_site.data())
-        try:
-            if site_number   == 0: 
-                slot = uut.s0    # Only for a GPG system.
-            elif site_number == 1:
-                slot = uut.s1
-            elif site_number == 2:
-                slot = uut.s2
-            elif site_number == 3:
-                slot = uut.s3
-            elif site_number == 4:
-                slot = uut.s4
-            elif site_number == 5:
-                slot = uut.s5
-            elif site_number == 6:
-                slot = uut.s6
-        except:
-            pass
-        
-        return slot
+        for site, client in sorted(uut.modules.items()):
+            site_node = self.device.getNode('SITE%d' % (site,))
+            model = str(site_node.MODEL.data()) # or get it from the uut ?
 
-    def _is_pg(self, uut):
-        slot = self._get_pg_slot(uut)
+            is_gpg = model == 'GPG ???'
 
-        site = self.dio_site.data()
-        
-        try:
-            if site == 0:
-                is_pg = False
+            # if is_gpg:
+                # client.GPG_ENABLE = 1
+                # client.GPG_MODE   = 'LOOP'
+
+                # client.GPG_TRG        = 'enable'
+                # client.GPG_TRG_DX     = str(self.gpg_trg_dx.data())
+                # client.GPG_TRG_SENSE  = 'rising'
+
+                # self._log_info('Setting Trigger for GPG')
+
+            if model in _DIO_MODELS:
+                client.TRG        = 'enable'
+                client.TRG_DX     = str(self.TRIGGER.WRTD_SOURCE.data())
+                client.TRG_SENSE  = 'rising'
+
+                self._log_info('Setting Trigger for DIO482 in site %d' % (site,))
+
+            nchan = 0
+            if model == 'DIO482ELF':
+                nchan = 32
+            elif model == 'DIO482ELF_TD':
+                nchan = 4
+
+            data_by_chan = []
+            all_times = []
+
+            for i in range(nchan):
+                chan_node = site_node.getNode('OUTPUT_%3.3d' % (i + 1))
+
+                times = chan_node.dim_of().data()
+                data = chan_node.data()
+
+                # Build dictionary of times -> states
+                data_dict = dict(zip(times, data))
+
+                data_by_chan.append(data_dict)
+                all_times.extend(times)
+
+            all_times = sorted(list(set(all_times)))
+
+            # initialize the state matrix
+            state_matrix = np.zeros((len(all_times), nchan), dtype='int')
+
+            for c, data in enumerate(data_by_chan):
+                for t, time in enumerate(all_times):
+                    if time in data:
+                        state_matrix[t][c] = data[time]
+                    else:
+                        state_matrix[t][c] = state_matrix[t - 1][c]
+
+            # Building the string of 1s and 0s for each transition time:
+            binary_rows = []
+            times_usecs = []
+            last_row = None
+            for time, row in zip(all_times, state_matrix):
+                if not np.array_equal(row, last_row):
+                    rowstr = [ str(i) for i in np.flip(row) ]  # flipping the bits so that chan 1 is in the far right position
+                    binary_rows.append(''.join(rowstr))
+                    times_usecs.append(int(time * 1E7)) # Converting the original units of the transtion times in seconds, to 1/10th micro-seconds
+                    last_row = row
+
+            # TODO: depending on the hardware there is a limit number of states allowed.
+            # The lines below limits the number of the CMOD's 1800 states table to just 510:
+            # binary_rows = binary_rows[0:510]
+            # times_usecs = times_usecs[0:510]
+
+            # Write to a list with states in HEX form.
+            stl  = ''
+            for time, state in zip(times_usecs, binary_rows):
+                stl += '%d,%08X\n' % (time, int(state, 2))
+
+            self._log_verbose('STL Table for site %d' % (site,))
+            self._log_verbose(stl)
+
+            # What follows checks if the system is a GPG module (site 0) or a PG module (site 1..6)
+            if is_gpg:
+                uut.load_wrpg(stl)
+                self._log_info('Uploaded STL for GPG')
             else:
-                is_pg = slot.GPG_ENABLE is not None
-        except:
-            is_pg = False
-
-        return is_pg
-
-    def _set_pg_triggers(self, uut):
-        slot = self._get_pg_slot(uut)
-        
-        slot.GPG_ENABLE = 1
-        slot.GPG_MODE   = 'LOOP'
-
-        if self.isPG():
-            slot.TRG        = 'enable'
-            slot.TRG_DX     = str(self.gpg_trg_dx.data())
-            slot.TRG_SENSE  = 'rising'
-        else:
-            slot.GPG_TRG        = 'enable'
-            slot.GPG_TRG_DX     = str(self.gpg_trg_dx.data())
-            slot.GPG_TRG_SENSE  = 'rising'
-      
-
-    def _upload_stl(self, uut):
-        # Pair of (transition time, 32 bit channel states):
-        stl = str(self.stl.data())
-        
-        is_debug = (self.debug > 0)
-                
-        #What follows checks if the system is a GPG module (site 0) or a PG module (site 1..6)
-        if self._is_pg():
-            uut.load_dio482pg(self.dio_site.data(), stl, is_debug)
-        else:
-            uut.load_wrpg(stl, is_debug)
-    
-    def _set_stl(self, nchan):
-        import numpy
-        data_by_chan = []
-        all_times = []
-
-        for i in range(nchan):
-            c = self.__getattr__('OUTPUT_%3.3d' % (i + 1))
-
-            times = c.dim_of().data()
-            data = c.data()
-
-            # Build dictionary of times -> states
-            data_dict = { k: v for k, v in zip(times, data) }
-
-            data_by_chan.append(data_dict)
-            all_times.extend(times)
-
-        all_times = sorted(list(set(all_times)))
-
-        # initialize the state matrix
-        state_matrix = numpy.zeros((len(all_times), nchan), dtype='int')
-                
-        for c, data in enumerate(data_by_chan):
-            for t, time in enumerate(all_times):
-                if time in data:
-                    state_matrix[t][c] = data[time]
-                else:
-                    state_matrix[t][c] = state_matrix[t - 1][c]
-
-        # Building the string of 1s and 0s for each transition time:
-        binary_rows = []
-        times_usecs = []
-        last_row = None
-        for time, row in zip(all_times, state_matrix):
-            if not numpy.array_equal(row, last_row):
-                rowstr = [ str(i) for i in numpy.flip(row) ]  # flipping the bits so that chan 1 is in the far right position
-                binary_rows.append(''.join(rowstr))
-                times_usecs.append(int(time * 1E7)) # Converting the original units of the transtion times in seconds, to 1/10th micro-seconds
-                last_row = row
-
-        # TODO: depending on the hardware there is a limit number of states allowed. 
-        # The lines below limits the number of the CMOD's 1800 states table to just 510:
-        # binary_rows = binary_rows[0:510]
-        # times_usecs = times_usecs[0:510]
-        
-        # Write to a list with states in HEX form.
-        stl  = ''
-        for time, state in zip(times_usecs, binary_rows):
-            stl += '%d,%08X\n' % (time, int(state, 2))
-        
-        self.stl.record = stl
-        
+                uut.load_dio482pg(site, stl)
+                self._log_info('Uploaded STL for site %d' % (site,))
 
     class Monitor(threading.Thread):
         """Monitor thread for recording device temperature and voltage"""
@@ -1552,7 +1558,8 @@ class ACQ2106(MDSplus.Device):
     ###
 
     def arm_transient(self):
-        if self.MODE.data().upper() != 'TRANSIENT':
+        mode = str(self.MODE.data()).upper()
+        if mode != 'TRANSIENT':
             raise Exception('Device is not configured for transient recording. Set MODE to "TRANSIENT" and then run configure().')
 
         uut = self._get_uut()
@@ -1567,62 +1574,142 @@ class ACQ2106(MDSplus.Device):
         monitor.setDaemon(True)
         monitor.start()
 
+        trigger_source = str(self.TRIGGER.SOURCE.data()).upper()
+        if (trigger_source == 'STRIG'):
+            uut.s0.TRANSIENT_SET_ARM = '1'
+
     ARM_TRANSIENT = arm_transient
 
-
     def store_transient(self):
-        if self.MODE.data().upper() != 'TRANSIENT':
+        mode = str(self.MODE.data()).upper()
+        if mode != 'TRANSIENT':
             raise Exception('Device is not configured for transient recording. Set MODE to "TRANSIENT" and then run configure().')
 
-        self.RUNNING.on = False
+        uut = self._get_uut()
+        if uut is None:
+            raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
 
-        # TODO: Store
+        self.RUNNING.on = False
+        
+        presamples = int(self.TRANSIENT.PRESAMPLES.data())
+        postsamples = int(self.TRANSIENT.POSTSAMPLES.data())
+
+        # Wait for post-processing to finish
+        # TODO: Timeout?
+        while uut.statemon.get_state() != 0:
+            pass
+        
+        # Determine how many extra SPAD channels there are
+        # [0] is 1=enabled/0=disabled
+        # [1] is the number of SPAD channels
+        # [2] can be ignored
+        spad_enabled, spad, _ = uut.s0.spad.split(',')
+        self.nspad = int(spad) if spad_enabled == '1' else 0
+
+        # All remaining channels are actual data
+        self.nchan = uut.nchan() - self.nspad
+
+        # # Find the lowest common decimator
+        # decimator = 1
+        # for soft_decim in software_decimations:
+        #     decimator = int(decimator * soft_decim / gcd(decimator, soft_decim))
+        # self.device._log_info(f"Calculated a greatest common decimator of {decimator}")
+        
+        raw_data = uut.read_channels()
+        
+        for site in list(map(int, uut.get_aggregator_sites())):
+            site_node = self.device.getNode('SITE%d' % (site,))
+            client = uut.modules[site]
+            for i in range(int(client.NCHAN)):
+                input_node = site_node.getNode('INPUT_%02d' % (i + 1,))
+                # input_nodes.append(input_node)
+                # resampled_nodes.append(input_node.RESAMPLED)
+                # resample_factors.append(int(input_node.RES_FACTOR.data()))
+                # software_decimations.append(int(input_node.SOFT_DECIM.data()))
+                
+                raw_data[channel_offset + i]
+            
+            channel_offset += int(client.NCHAN)
+        
+        channel_offset = 0
+        for site in sorted(list(map(int, uut.get_aggregator_sites()))):
+            site_node = self.device.getNode('SITE%d' % (site,))
+            client = uut.modules[site]
+            for i in range(int(client.NCHAN)):
+                input_node = site_node.getNode('INPUT_%02d' % (i + 1,))
+                # software_decimations.append(int(input_node.SOFT_DECIM.data()))
+                
+                raw_data[channel_offset + i]
+            
+            channel_offset += int(client.NCHAN)
+                
+
+
+                bytes_per_row = (self.nchan * uut.data_size()) + (self.nspad * 4) # SPAD channels are always 32 bit
+
+
+            event_name = str(self.TRANSIENT.EVENT_NAME.data())
+            MDSplus.Event(event_name)
+        
 
     STORE_TRANSIENT = store_transient
 
     def soft_trigger(self):
-        pass
-
-    SOFT_TRIGGER = soft_trigger
-    
-    
-    ###
-    ### DIO/PG Methods
-    ###   
-    
-    def arm_dio(self):
-        
         uut = self._get_uut()
         if uut is None:
             raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
-        
-        slot = self._get_pg_slot(uut)
 
-        self._set_pg_triggers(uut)
+        mode = str(self.MODE.data()).upper()
+        if mode == 'TRANSIENT':
+            uut.s0.soft_trigger = '1'
+        elif mode == 'STREAM':
+            uut.s0.CONTINUOUS = '1'
 
-        # TIGA: PG nchans = 4, or non-TIGA PG nchans = 32
-        tiga    = '7B'
-        nontiga = '6B'
+    SOFT_TRIGGER = soft_trigger
 
-        site = self.dio_site.data()
-        if site == 0 or slot.MTYPE in nontiga:
-            nchans = 32
-            if self.debug >= 2:
-                self.dprint(2, 'DIO site and Number of Channels: {} {}'.format(self.dio_site.data(), nchans))
-        elif slot.MTYPE in tiga:
-            nchans = 4            
-            if self.debug >= 2:
-                self.dprint(2, 'DIO site and Number of Channels: {} {}'.format(self.dio_site.data(), nchans))
-        
-        # Create the STL table:
-        self._set_stl(nchans)
+    # TODO: Improve based on user feedback
+    def arm_pulse_generators(self):
+        uut = self._get_uut()
+        if uut is None:
+            raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
 
-        #Load the STL into the DIO or GPG module.
-        self._upload_stl(uut)
-        
-        self.dprint(1, 'ACQ WRPG has loaded the STL. Waiting for trigger.')
+        self._setup_pulse_generators(uut)
 
-    ARM_DIO = arm_dio    
+    ARM_PULSE_GENERATORS = arm_pulse_generators
+
+    def wrtd_trigger(self):
+        uut = self._get_uut()
+        if uut is None:
+            raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
+
+        uut.cC.WRTD_ID = str(self.WR.TX_MESSAGE.data())
+
+        uut.s0.WR_TRG = 1
+        uut.s0.WR_TRG_DX = str(self.TRIGGER.WRTD_SOURCE.data())
+
+        for site, client in sorted(uut.modules.items()):
+            site_node = self.device.getNode('SITE%d' % (site,))
+            model = str(site_node.MODEL.data())
+
+            if model == 'DIO482ELF_TD': # TIGA
+                self._log_info('Configuring WR TIming Generator Appliance (TIGA) Triggers for site %d' % (site,))
+
+                client.WRTD_ID = str(site_node.TX_MESSAGE.data())
+                client.WRTD_TX_MASK = (1 << (site + 1)) # TODO: Investigate
+
+                client.TRG = 1
+                client.TRG_DX = str(site_node.WRTD_SOURCE.data()) # TODO: Better name
+
+    WRTD_TRIGGER = wrtd_trigger
+
+    def send_wrtd_message(self, message):
+        uut = self._get_uut()
+        if uut is None:
+            raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
+
+        uut.cC.wrtd_txi = message
+
+    SEND_WRTD_MESSAGE = send_wrtd_message
 
     def get_state(self):
         uut = self._get_uut()
@@ -1766,14 +1853,7 @@ class ACQ2106(MDSplus.Device):
 
             data_size = uut.data_size()
 
-            # TODO: has_hudp
-            # TODO: has_tiga
-            has_tiga = (uut.s0.is_tiga != 'none')
-            if has_tiga:
-                self._log_info('Detected Timing Generator Appliance (TIGA) capabilities')
-
-
-            aggregator_sites = list(map(int, uut.get_aggregator_sites()))
+            # aggregator_sites = list(map(int, uut.get_aggregator_sites()))
 
         else:
 
@@ -1787,10 +1867,6 @@ class ACQ2106(MDSplus.Device):
 
             if 'has_sc' in kwargs and self._to_bool(kwargs['has_sc']):
                 self._log_info('Assuming Signal Conditioning capabilities')
-                has_sc = True
-                
-            if 'has_tiga' in kwargs and self._to_bool(kwargs['has_tiga']):
-                self._log_info('Assuming Timing Generator Appliance (TIGA) capabilities')
                 has_sc = True
 
             modules = self.MODULES.getDataNoRaise()
@@ -1828,13 +1904,6 @@ class ACQ2106(MDSplus.Device):
 
         if has_sc:
             self._add_parts(self._sc_parts, overwrite_data)
-
-        ###
-        ### TIGA Nodes
-        ###
-
-        if has_tiga:
-            self._add_parts(self._dio_td_parts, overwrite_data)
 
         ###
         ### HUDP Nodes
@@ -1971,7 +2040,7 @@ class ACQ2106(MDSplus.Device):
             raise Exception('The modules in the device have changed since the last call to configure(). You must run configure() again.')
 
         # Verify the values of all nodes
-        
+
         # if self.HARD_DECIM.data() > 16 and self.FREQUENCY.data() < 10000:
         #     self._log_warning('Using Hardware Decimation > 16 with a Frequency of < 10000 will cause data loss.')
 
@@ -2170,6 +2239,6 @@ class ACQ2106(MDSplus.Device):
                 dictionary[pair] = None
         return dictionary
 
-    
+
 class ACQ1001(ACQ2106):
     _MAX_SITES = 1
