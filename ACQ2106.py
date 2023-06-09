@@ -1596,7 +1596,7 @@ class ACQ2106(MDSplus.Device):
 
         # Wait for post-processing to finish
         # TODO: Timeout?
-        while uut.statemon.get_state() != 0:
+        while uut.statmon.get_state() != 0:
             pass
         
         # Determine how many extra SPAD channels there are
@@ -1617,6 +1617,7 @@ class ACQ2106(MDSplus.Device):
         
         raw_data = uut.read_channels()
         
+        channel_offset = 0
         for site in list(map(int, uut.get_aggregator_sites())):
             site_node = self.device.getNode('SITE%d' % (site,))
             client = uut.modules[site]
@@ -1630,26 +1631,9 @@ class ACQ2106(MDSplus.Device):
                 raw_data[channel_offset + i]
             
             channel_offset += int(client.NCHAN)
-        
-        channel_offset = 0
-        for site in sorted(list(map(int, uut.get_aggregator_sites()))):
-            site_node = self.device.getNode('SITE%d' % (site,))
-            client = uut.modules[site]
-            for i in range(int(client.NCHAN)):
-                input_node = site_node.getNode('INPUT_%02d' % (i + 1,))
-                # software_decimations.append(int(input_node.SOFT_DECIM.data()))
-                
-                raw_data[channel_offset + i]
-            
-            channel_offset += int(client.NCHAN)
-                
 
-
-                bytes_per_row = (self.nchan * uut.data_size()) + (self.nspad * 4) # SPAD channels are always 32 bit
-
-
-            event_name = str(self.TRANSIENT.EVENT_NAME.data())
-            MDSplus.Event(event_name)
+        event_name = str(self.TRANSIENT.EVENT_NAME.data())
+        MDSplus.Event(event_name)
         
 
     STORE_TRANSIENT = store_transient
