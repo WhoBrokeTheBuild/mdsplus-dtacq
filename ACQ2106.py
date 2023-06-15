@@ -508,7 +508,7 @@ class ACQ2106(MDSplus.Device):
 
     for _spad_index in range(3, _MAX_SPAD):
         _default_parts.append({
-            'path': ':SCRATCHPAD:SPAD%d' % (_spad_index,),
+            'path': f":SCRATCHPAD:SPAD{_spad_index}",
             'type': 'signal',
             'options': ('no_write_model',),
         })
@@ -741,7 +741,7 @@ class ACQ2106(MDSplus.Device):
     ]
 
     def _get_parts_for_site(self, site, model, has_sc=False):
-        site_path = ':SITE%d' % (site,)
+        site_path = f":SITE{site}"
         parts = [
             {
                 'path': site_path,
@@ -772,8 +772,8 @@ class ACQ2106(MDSplus.Device):
         ]
 
         if model == 'ACQ435ELF' or model == 'ACQ423ELF':
-            for i in range(32):
-                input_path = site_path + ':INPUT_%02d' % (i + 1,)
+            for input_index in range(32):
+                input_path = site_path + f":INPUT_{input_index + 1:02}"
                 parts += [
                     {
                         'path': input_path,
@@ -873,9 +873,10 @@ class ACQ2106(MDSplus.Device):
                     ]
 
         elif model == 'ACQ424ELF':
-            for i in range(32):
+            for output_index in range(32):
+                output_path = site_path + f":OUTPUT_{output_index + 1:02}"
                 parts.append({
-                    'path': ':SITE%d:OUTPUT_%02d' % (site, i + 1,),
+                    'path': output_path,
                     'type': 'signal',
                     'output': True,
                 })
@@ -889,7 +890,7 @@ class ACQ2106(MDSplus.Device):
         elif model == 'DIO482ELF_TD':
             parts += [
                 {
-                    'path': ':SITE%d:TX_MESSAGE' % (site,), # TODO: Better name
+                    'path': site_path + ':TX_MESSAGE', # TODO: Better name
                     'type': 'text',
                     'options': ('no_write_shot',),
                     'ext_options': {
@@ -897,7 +898,7 @@ class ACQ2106(MDSplus.Device):
                     },
                 },
                 {
-                    'path': ':SITE%d:WRTD_SOURCE' % (site,), # TODO: Better name
+                    'path': site_path + ':WRTD_SOURCE', # TODO: Better name
                     'type': 'text',
                     'value': 'FPTRG',
                     'options': ('no_write_shot',),
@@ -908,10 +909,11 @@ class ACQ2106(MDSplus.Device):
                 },
             ]
 
-            for i in range(4):
+            for output_index in range(4):
+                output_path = site_path + f":OUTPUT_{output_index + 1:02}"
                 parts += [
                     {
-                        'path': ':SITE%d:OUTPUT_%02d' % (site, i + 1,),
+                        'path': output_path,
                         'type': 'signal',
                         'ext_options': {
                             'tooltip': 'Data for this ',
@@ -920,7 +922,7 @@ class ACQ2106(MDSplus.Device):
                 ]
 
         else:
-            raise Exception('Unknown module %s in site %d' % (model, site,))
+            raise Exception(f"Unknown module {model} in site {site}")
 
         return parts
 
@@ -966,8 +968,8 @@ class ACQ2106(MDSplus.Device):
 
     def _init(self, uut):
         # TODO: Put all the startup shit here
-        # siteNode = self.getNode('SITE%d' % (site,))
-        # siteNode.SERIAL.record = client.SERIAL
+        # site_node = self.getNode(f"SITE{site}")
+        # site_node.SERIAL.record = client.SERIAL
 
         # TODO: Improve
         #has_sc = False
@@ -988,16 +990,16 @@ class ACQ2106(MDSplus.Device):
         for site in list(map(int, uut.get_aggregator_sites())):
             client = uut.modules[site]
 
-            self._log_info('Reading Calibration for site %d' % (site,))
+            self._log_info(f"Reading Calibration for site {site}")
 
             coefficients = list(map(float, client.AI_CAL_ESLO.split()[3:]))
             offsets = list(map(float, client.AI_CAL_EOFF.split()[3:]))
 
             site_node = self.getNode(f"SITE{site}")
-            for i in range(int(client.NCHAN)):
-                input_node = site_node.getNode('INPUT_%02d' % (i + 1,))
-                input_node.COEFFICIENT.record = coefficients[i]
-                input_node.OFFSET.record = offsets[i]
+            for input_index in range(int(client.NCHAN)):
+                input_node = site_node.getNode(f"INPUT_{input_index + 1:02}")
+                input_node.COEFFICIENT.record = coefficients[input_index]
+                input_node.OFFSET.record = offsets[input_index]
 
     _SECONDS_TO_NANOSECONDS = 1_000_000_000
     """One second in nanoseconds"""
@@ -1099,16 +1101,16 @@ class ACQ2106(MDSplus.Device):
             site_node = self.getNode(f"SITE{site}")
             epics_prefix = self.EPICS_NAME.data() + f":{site}:SC32:"
 
-            for i in range(int(client.NCHAN)):
-                input_node = site_node.getNode(f"INPUT_{i + 1:02d}")
+            for input_index in range(int(client.NCHAN)):
+                input_node = site_node.getNode(f"INPUT_{input_index + 1:02}")
 
-                pv = epics.PV(epics_prefix + f"G1:{i:02d}")
+                pv = epics.PV(epics_prefix + f"G1:{input_index:02}")
                 pv.put(str(input_node.SC_GAIN1.data()), wait=True)
 
-                pv = epics.PV(epics_prefix + f"G2:{i:02d}")
+                pv = epics.PV(epics_prefix + f"G2:{input_index:02}")
                 pv.put(str(input_node.SC_GAIN2.data()), wait=True)
 
-                pv = epics.PV(epics_prefix + f"OFFSET:{i:02d}")
+                pv = epics.PV(epics_prefix + f"OFFSET:{input_index:02}")
                 pv.put(str(input_node.SC_OFFSET.data()), wait=True)
 
             self._log_verbose(f"Comitting Signal Conditioning Gains and Offsets for site {site}")
@@ -1120,7 +1122,7 @@ class ACQ2106(MDSplus.Device):
         _DIO_MODELS = ['DIO482ELF', 'DIO482ELF_TD']
 
         for site, client in sorted(uut.modules.items()):
-            site_node = self.device.getNode('SITE%d' % (site,))
+            site_node = self.device.getNode(f"SITE{site}")
             model = str(site_node.MODEL.data()) # or get it from the uut ?
 
             is_gpg = model == 'GPG ???'
@@ -1140,19 +1142,15 @@ class ACQ2106(MDSplus.Device):
                 client.TRG_DX     = str(self.TRIGGER.WRTD_SOURCE.data())
                 client.TRG_SENSE  = 'rising'
 
-                self._log_info('Setting Trigger for DIO482 in site %d' % (site,))
-
-            nchan = 0
-            if model == 'DIO482ELF':
-                nchan = 32
-            elif model == 'DIO482ELF_TD':
-                nchan = 4
+                self._log_info(f"Setting Trigger for DIO482 in site {site}")
+                
+            nchan = int(client.NCHAN)
 
             data_by_chan = []
             all_times = []
 
-            for i in range(nchan):
-                chan_node = site_node.getNode('OUTPUT_%3.3d' % (i + 1))
+            for output_index in range(nchan):
+                chan_node = site_node.getNode(f"OUTPUT_{output_index + 1:02}")
 
                 times = chan_node.dim_of().data()
                 data = chan_node.data()
@@ -1194,9 +1192,9 @@ class ACQ2106(MDSplus.Device):
             # Write to a list with states in HEX form.
             stl  = ''
             for time, state in zip(times_usecs, binary_rows):
-                stl += '%d,%08X\n' % (time, int(state, 2))
+                stl += f"{time},{int(state, 2):08X}\n"
 
-            self._log_verbose('STL Table for site %d' % (site,))
+            self._log_verbose(f"STL Table for site {site}")
             self._log_verbose(stl)
 
             # What follows checks if the system is a GPG module (site 0) or a PG module (site 1..6)
@@ -1205,7 +1203,7 @@ class ACQ2106(MDSplus.Device):
                 self._log_info('Uploaded STL for GPG')
             else:
                 uut.load_dio482pg(site, stl)
-                self._log_info('Uploaded STL for site %d' % (site,))
+                self._log_info(f"Uploaded STL for site {site}")
 
     class Monitor(threading.Thread):
         """Monitor thread for recording device temperature and voltage"""
@@ -1286,18 +1284,19 @@ class ACQ2106(MDSplus.Device):
                 resample_factors = []
                 software_decimations = []
                 for site in list(map(int, uut.get_aggregator_sites())):
-                    site_node = self.device.getNode('SITE%d' % (site,))
+                    site_node = self.device.getNode(f"SITE{site}")
                     client = uut.modules[site]
-                    for i in range(int(client.NCHAN)):
-                        input_node = site_node.getNode('INPUT_%02d' % (i + 1,))
+                    for input_index in range(int(client.NCHAN)):
+                        input_node = site_node.getNode(f"INPUT_{input_index + 1:02}")
                         input_nodes.append(input_node)
+                        
                         resampled_nodes.append(input_node.RESAMPLED)
                         resample_factors.append(int(input_node.RES_FACTOR.data()))
                         software_decimations.append(int(input_node.SOFT_DECIM.data()))
 
                 spad_nodes = []
-                for i in range(self.device._MAX_SPAD):
-                    spad_node = self.device.SCRATCHPAD.getNode('SPAD%d' % (i,))
+                for spad_index in range(self.device._MAX_SPAD):
+                    spad_node = self.device.SCRATCHPAD.getNode(f"SPAD{spad_index}")
                     if i < self.reader.nspad:
                         spad_nodes.append(spad_node)
                     else:
@@ -1405,18 +1404,18 @@ class ACQ2106(MDSplus.Device):
 
                 software_decimations = []
                 for site in list(map(int, uut.get_aggregator_sites())):
-                    site_node = self.device.getNode('SITE%d' % (site,))
+                    site_node = self.device.getNode(f"SITE{site}")
                     client = uut.modules[site]
-                    for i in range(int(client.NCHAN)):
-                        input_node = site_node.getNode('INPUT_%02d' % (i + 1,))
+                    for input_index in range(int(client.NCHAN)):
+                        input_node = site_node.getNode(f"INPUT_{input_index + 1:02}")
                         software_decimations.append(int(input_node.SOFT_DECIM.data()))
 
                 # Determine how many extra SPAD channels there are
                 # [0] is 1=enabled/0=disabled
                 # [1] is the number of SPAD channels
                 # [2] can be ignored
-                spad_enabled, spad, _ = uut.s0.spad.split(',')
-                self.nspad = int(spad) if spad_enabled == '1' else 0
+                spad_enabled, nspad, _ = uut.s0.spad.split(',')
+                self.nspad = int(nspad) if spad_enabled == '1' else 0
 
                 # All remaining channels are actual data
                 self.nchan = uut.nchan() - self.nspad
@@ -1549,6 +1548,8 @@ class ACQ2106(MDSplus.Device):
         if self.MODE.data().upper() != 'STREAM':
             raise Exception('Device is not configured for streaming. Set MODE to "STREAM" and then run configure().')
 
+        self.RUNNING.on = False
+        
         # TODO:
 
     ABORT_STREAM = abort_stream
@@ -1612,27 +1613,29 @@ class ACQ2106(MDSplus.Device):
         
         channel_offset = 0
         for site in list(map(int, uut.get_aggregator_sites())): # TODO: sorted() ?
-            site_node = self.getNode('SITE%d' % (site,))
+            site_node = self.getNode(f"SITE{site}")
             client = uut.modules[site]
-            for i in range(int(client.NCHAN)):
-                input_node = site_node.getNode('INPUT_%02d' % (i + 1,))
+            nchan = int(client.NCHAN)
+            
+            for input_index in range(nchan):
+                input_node = site_node.getNode(f"INPUT_{input_index + 1:02}")
                 
-                signal = MDSplus.Signal(raw_data[channel_offset + i], None, mds_dim)
+                signal = MDSplus.Signal(raw_data[channel_offset + input_index], None, mds_dim)
                 input_node.putData(signal)
             
-            channel_offset += int(client.NCHAN)
+            channel_offset += nchan
         
         # Determine how many extra SPAD channels there are
         # [0] is 1=enabled/0=disabled
         # [1] is the number of SPAD channels
         # [2] can be ignored
-        spad_enabled, spad, _ = uut.s0.spad.split(',')
-        nspad = int(spad) if spad_enabled == '1' else 0
+        spad_enabled, nspad, _ = uut.s0.spad.split(',')
+        nspad = int(nspad) if spad_enabled == '1' else 0
             
-        for i in range(self._MAX_SPAD):
-            spad_node = self.SCRATCHPAD.getNode('SPAD%d' % (i,))
-            if i < nspad:
-                signal = MDSplus.Signal(raw_data[channel_offset + i], None, mds_dim)
+        for spad_index in range(self._MAX_SPAD):
+            spad_node = self.SCRATCHPAD.getNode(f"SPAD{spad_index}")
+            if spad_index < nspad:
+                signal = MDSplus.Signal(raw_data[channel_offset + spad_index], None, mds_dim)
                 spad_node.putData(signal)
             else:
                 # Turn off the unused SPAD nodes
@@ -1677,11 +1680,11 @@ class ACQ2106(MDSplus.Device):
         uut.s0.WR_TRG_DX = str(self.TRIGGER.WRTD_SOURCE.data())
 
         for site, client in sorted(uut.modules.items()):
-            site_node = self.device.getNode('SITE%d' % (site,))
+            site_node = self.device.getNode(f"SITE{site}")
             model = str(site_node.MODEL.data())
 
             if model == 'DIO482ELF_TD': # TIGA
-                self._log_info('Configuring WR TIming Generator Appliance (TIGA) Triggers for site %d' % (site,))
+                self._log_info(f"Configuring WR TIming Generator Appliance (TIGA) Triggers for site {site}")
 
                 client.WRTD_ID = str(site_node.TX_MESSAGE.data())
                 client.WRTD_TX_MASK = (1 << (site + 1)) # TODO: Investigate
@@ -1930,9 +1933,9 @@ class ACQ2106(MDSplus.Device):
         #     model = modules[site]
         #     info = self._get_module_info(model)
 
-        #     site_node = self.getNode('SITE%d' % (site,))
-        #     for i in range(info['nchan']):
-        #         input_node = site_node.getNode('INPUT_%02d' % (i + 1,))
+        #     site_node = self.getNode(f"SITE{site}")
+        #     for input in range(info['nchan']):
+        #         input_node = site_node.getNode(f"INPUT_{input + 1:02}")
         #         all_inputs.append(input_node)
 
         # self._log_info(f"Found a total of {len(all_inputs)} aggregated inputs")
@@ -1944,13 +1947,13 @@ class ACQ2106(MDSplus.Device):
         #             'type': 'structure',
         #         }
         #     ]
-        #     for i, input in enumerate(all_inputs):
-        #         input_path = ':INPUTS:INPUT_%03d' % (i + 1,)
+        #     for input_index, input_node in enumerate(all_inputs):
+        #         input_path = f":INPUTS:INPUT_{input_index + 1:03}"
         #         input_parts += [
         #             {
         #                 'path': input_path,
         #                 'type': 'signal',
-        #                 'value': input,
+        #                 'value': input_node,
         #             },
         #             {
         #                 'path': input_path + ':RESAMPLED',
@@ -1960,7 +1963,7 @@ class ACQ2106(MDSplus.Device):
         #         ]
         #     self._add_parts(input_parts, overwrite_data)
 
-        # print('Found a total of %d inputs' % (len(self._configure_outputs),))
+        # print(f"Found a total of {len(self._configure_outputs)} inputs")
 
         # if len(self._configure_outputs) > 0:
         #     output_parts = [
@@ -1968,11 +1971,11 @@ class ACQ2106(MDSplus.Device):
         #             'path': ':OUTPUTS',
         #         }
         #     ]
-        #     for i, output in enumerate(self._configure_outputs):
+        #     for output_index, output_node in enumerate(self._configure_outputs):
         #         output_parts.append({
-        #             'path': 'OUTPUTS:OUTPUT_%03d' % (i + 1,),
+        #             'path': f"OUTPUTS:OUTPUT_{output_index + 1:03}"
         #             'type': 'signal',
-        #             'value': output,
+        #             'value': output_node,
         #         })
         #     self._add_parts(output_parts, overwrite_data)
 
@@ -2162,7 +2165,7 @@ class ACQ2106(MDSplus.Device):
                 node.setUsage(usage)
 
             if 'options' in part:
-                # print('Setting options of %s: %s' % (node.path, part['options'],))
+                # print(f"Setting options of {node.path}: {part['options']}")
                 for option in part['options']:
                     node.__setattr__(option, True)
 
