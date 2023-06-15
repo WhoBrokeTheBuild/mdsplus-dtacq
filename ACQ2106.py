@@ -1590,51 +1590,56 @@ class ACQ2106(MDSplus.Device):
             raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
 
         self.RUNNING.on = False
-        
-        presamples = int(self.TRANSIENT.PRESAMPLES.data())
-        postsamples = int(self.TRANSIENT.POSTSAMPLES.data())
 
         # Wait for post-processing to finish
         # TODO: Timeout?
         while uut.statmon.get_state() != 0:
             pass
         
+        presamples = int(self.TRANSIENT.PRESAMPLES.data())
+        postsamples = int(self.TRANSIENT.POSTSAMPLES.data())
+        
+        start_index = -presamples + 1
+        end_index = postsamples
+        
+        clock_period = 1.0 / self.FREQUENCY.data()
+        
+        mds_window = MDSplus.Window(start_index, end_index, 0)
+        mds_range = MDSplus.Range(None, None, clock_period)
+        mds_dim = MDSplus.Dimension(mds_window, mds_range)
+
+        raw_data = uut.read_channels()
+        
+        channel_offset = 0
+        for site in list(map(int, uut.get_aggregator_sites())): # TODO: sorted() ?
+            site_node = self.getNode('SITE%d' % (site,))
+            client = uut.modules[site]
+            for i in range(int(client.NCHAN)):
+                input_node = site_node.getNode('INPUT_%02d' % (i + 1,))
+                
+                signal = MDSplus.Signal(raw_data[channel_offset + i], None, mds_dim)
+                input_node.putData(signal)
+            
+            channel_offset += int(client.NCHAN)
+        
         # Determine how many extra SPAD channels there are
         # [0] is 1=enabled/0=disabled
         # [1] is the number of SPAD channels
         # [2] can be ignored
         spad_enabled, spad, _ = uut.s0.spad.split(',')
-        self.nspad = int(spad) if spad_enabled == '1' else 0
-
-        # All remaining channels are actual data
-        self.nchan = uut.nchan() - self.nspad
-
-        # # Find the lowest common decimator
-        # decimator = 1
-        # for soft_decim in software_decimations:
-        #     decimator = int(decimator * soft_decim / gcd(decimator, soft_decim))
-        # self.device._log_info(f"Calculated a greatest common decimator of {decimator}")
-        
-        raw_data = uut.read_channels()
-        
-        channel_offset = 0
-        for site in list(map(int, uut.get_aggregator_sites())):
-            site_node = self.device.getNode('SITE%d' % (site,))
-            client = uut.modules[site]
-            for i in range(int(client.NCHAN)):
-                input_node = site_node.getNode('INPUT_%02d' % (i + 1,))
-                # input_nodes.append(input_node)
-                # resampled_nodes.append(input_node.RESAMPLED)
-                # resample_factors.append(int(input_node.RES_FACTOR.data()))
-                # software_decimations.append(int(input_node.SOFT_DECIM.data()))
-                
-                raw_data[channel_offset + i]
+        nspad = int(spad) if spad_enabled == '1' else 0
             
-            channel_offset += int(client.NCHAN)
+        for i in range(self._MAX_SPAD):
+            spad_node = self.SCRATCHPAD.getNode('SPAD%d' % (i,))
+            if i < nspad:
+                signal = MDSplus.Signal(raw_data[channel_offset + i], None, mds_dim)
+                spad_node.putData(signal)
+            else:
+                # Turn off the unused SPAD nodes
+                spad_node.on = False
 
         event_name = str(self.TRANSIENT.EVENT_NAME.data())
         MDSplus.Event(event_name)
-        
 
     STORE_TRANSIENT = store_transient
 
@@ -1727,6 +1732,10 @@ class ACQ2106(MDSplus.Device):
         overwrite_data = False
         if 'overwrite_data' in kwargs and self._to_bool(kwargs['overwrite_data']):
             overwrite_data = True
+            
+        delete_nodes = False
+        if 'delete_nodes' in kwargs and self._to_bool(kwargs['delete_nodes']):
+            delete_nodes = True
 
         # The list of all nodes added during configure() has to contain the root device node as well
         self._configure_nodes = [self]
@@ -1975,17 +1984,25 @@ class ACQ2106(MDSplus.Device):
 
         bad_nids = set(all_nids) - set(new_nids)
         bad_paths = [ str(MDSplus.TreeNode(nid, self.tree).path) for nid in bad_nids ]
-        for path in bad_paths:
-            try:
-                self._log_info(f"Removing {path}")
+        
+        if delete_nodes:
+            for path in bad_paths:
+                try:
+                    self._log_info(f"Removing {path}")
+                    node = self.tree.getNode(path)
+                    node.delete()
+                except MDSplus.TreeNNF:
+                    # node.delete() deletes all child nodes as well, so the node may already be gone
+                    pass
+                except MDSplus.SsSUCCESS:
+                    # TODO: For some reason, node.delete() always throws this
+                    pass
+        else:
+            for path in bad_paths:
+                self._log_info(f"Disabling {path}")
                 node = self.tree.getNode(path)
-                node.delete()
-            except MDSplus.TreeNNF:
-                # node.delete() deletes all child nodes as well, so the node may already be gone
-                pass
-            except MDSplus.SsSUCCESS:
-                # TODO: For some reason, node.delete() always throws this
-                pass
+                node.on = False
+            
 
     CONFIGURE = configure
 
