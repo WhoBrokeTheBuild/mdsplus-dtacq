@@ -1087,8 +1087,15 @@ class ACQ2106(MDSplus.Device):
             uut.cC.WRTD_RX = int(self.WR.RX_ENABLE.on)
             uut.cC.WRTD_TX = int(self.WR.TX_ENABLE.on)
 
-            uut.cC.WRTD_RX_MATCHES = str(self.WR.RX0_FILTER.data())
-            uut.cC.WRTD_RX_MATCHES1 = str(self.WR.RX1_FILTER.data())
+            try:
+                uut.cC.WRTD_RX_MATCHES = str(self.WR.RX0_FILTER.data())
+            except MDSplus.TreeNODATA:
+                pass
+            
+            try:
+                uut.cC.WRTD_RX_MATCHES1 = str(self.WR.RX1_FILTER.data())
+            except MDSplus.TreeNODATA:
+                pass
 
             uut.cC.wrtd_commit_rx = 1
             uut.cC.wrtd_commit_tx = 1
@@ -1680,7 +1687,10 @@ class ACQ2106(MDSplus.Device):
         if uut is None:
             raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
 
-        uut.cC.WRTD_ID = str(self.WR.TX_MESSAGE.data())
+        try:
+            uut.cC.WRTD_ID = str(self.WR.TX_MESSAGE.data())
+        except MDSplus.TreeNODATA:
+            pass
 
         uut.s0.WR_TRG = 1
         uut.s0.WR_TRG_DX = str(self.TRIGGER.WRTD_SOURCE.data())
@@ -1692,7 +1702,11 @@ class ACQ2106(MDSplus.Device):
             if model == 'DIO482ELF_TD': # TIGA
                 self._log_info(f"Configuring WR TIming Generator Appliance (TIGA) Triggers for site {site}")
 
-                client.WRTD_ID = str(site_node.TX_MESSAGE.data())
+                try:
+                    client.WRTD_ID = str(site_node.TX_MESSAGE.data())
+                except MDSplus.TreeNODATA:
+                    pass
+                
                 client.WRTD_TX_MASK = (1 << (site + 1)) # TODO: Investigate
 
                 client.TRG = 1
