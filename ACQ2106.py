@@ -453,27 +453,6 @@ class ACQ2106(MDSplus.Device):
             },
         },
         {
-            'path': ':DEFAULTS:SOFT_DECIM',
-            'type': 'numeric',
-            'value': 1,
-            'options': ('no_write_shot',),
-            'ext_options': {
-                'tooltip': 'Default software decimation, which can be overridden per-input. Computed on the server by discarding every N-1 samples.'
-                    'Set to 1 to disable.',
-                'min': 1,
-            },
-        },
-        {
-            'path': ':DEFAULTS:RES_FACTOR',
-            'type': 'numeric',
-            'value': 100,
-            'options': ('no_write_shot',),
-            'ext_options': {
-                'tooltip': 'Default factor for resampling, which can be overridden per-input. Set to 1 to disable.',
-                'min': 1,
-            },
-        },
-        {
             'path': ':SCRATCHPAD',
             'type': 'structure',
             'ext_options': {
@@ -562,6 +541,27 @@ class ACQ2106(MDSplus.Device):
             'options': ('no_write_shot',),
             'ext_options': {
                 'tooltip': 'Name of the event generated whenever a segment is captured.',
+            },
+        },
+        {
+            'path': ':DEFAULTS:SOFT_DECIM',
+            'type': 'numeric',
+            'value': 1,
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Default software decimation, which can be overridden per-input. Computed on the server by discarding every N-1 samples.'
+                    'Set to 1 to disable.',
+                'min': 1,
+            },
+        },
+        {
+            'path': ':DEFAULTS:RES_FACTOR',
+            'type': 'numeric',
+            'value': 100,
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'Default factor for resampling, which can be overridden per-input. Set to 1 to disable.',
+                'min': 1,
             },
         },
     ]
@@ -741,6 +741,8 @@ class ACQ2106(MDSplus.Device):
     ]
 
     def _get_parts_for_site(self, site, model, has_sc=False):
+        mode = str(self.MODE.data())
+        
         site_path = f":SITE{site}"
         parts = [
             {
@@ -781,33 +783,6 @@ class ACQ2106(MDSplus.Device):
                         'valueExpr': 'head._set_input_segment_scale(node, node.COEFFICIENT, node.OFFSET)',
                     },
                     {
-                        'path': input_path + ':RESAMPLED',
-                        'type': 'signal',
-                        'valueExpr': 'head._set_input_segment_scale(node, node.parent.COEFFICIENT, node.parent.OFFSET)',
-                        'ext_options': {
-                            'tooltip': 'Data for this input, resampled with makeSegmentResampled(RES_FACTOR).',
-                        },
-                    },
-                    {
-                        'path': input_path + ':RES_FACTOR',
-                        'type': 'numeric',
-                        'valueExpr': 'head.DEFAULTS.RES_FACTOR',
-                        'ext_options': {
-                            'tooltip': 'Factor for resampling for this input. Set to 1 to disable.',
-                            'min': 1,
-                        },
-                    },
-                    {
-                        'path': input_path + ':SOFT_DECIM',
-                        'type': 'numeric',
-                        'valueExpr': 'head.DEFAULTS.SOFT_DECIM',
-                        'options':('no_write_shot',),
-                        'ext_options': {
-                            'tooltip': 'Software decimation for this input, which is computed on the server by discarding every N-1 samples. Set to 1 to disable.',
-                            'min': 1,
-                        },
-                    },
-                    {
                         'path': input_path + ':COEFFICIENT',
                         'type': 'numeric',
                         'options':('no_write_model', 'write_once',),
@@ -824,6 +799,37 @@ class ACQ2106(MDSplus.Device):
                         },
                     }
                 ]
+                
+                if mode == 'STREAM':
+                    parts += [
+                        {
+                            'path': input_path + ':RESAMPLED',
+                            'type': 'signal',
+                            'valueExpr': 'head._set_input_segment_scale(node, node.parent.COEFFICIENT, node.parent.OFFSET)',
+                            'ext_options': {
+                                'tooltip': 'Data for this input, resampled with makeSegmentResampled(RES_FACTOR).',
+                            },
+                        },
+                        {
+                            'path': input_path + ':RES_FACTOR',
+                            'type': 'numeric',
+                            'valueExpr': 'head.DEFAULTS.RES_FACTOR',
+                            'ext_options': {
+                                'tooltip': 'Factor for resampling for this input. Set to 1 to disable.',
+                                'min': 1,
+                            },
+                        },
+                        {
+                            'path': input_path + ':SOFT_DECIM',
+                            'type': 'numeric',
+                            'valueExpr': 'head.DEFAULTS.SOFT_DECIM',
+                            'options':('no_write_shot',),
+                            'ext_options': {
+                                'tooltip': 'Software decimation for this input, which is computed on the server by discarding every N-1 samples. Set to 1 to disable.',
+                                'min': 1,
+                            },
+                        },
+                    ]
 
                 # if has_slow:
                 #     parts += [
@@ -1062,7 +1068,7 @@ class ACQ2106(MDSplus.Device):
             for _, client in uut.modules.items():
                 client.nacc = decimation
 
-        except MDSplus.TreeNNF:
+        except AttributeError:
             pass
 
     def _setup_wr(self, uut):
@@ -1307,7 +1313,7 @@ class ACQ2106(MDSplus.Device):
                 hardware_decimation = 1
                 try:
                     hardware_decimation = int(self.device.HARD_DECIM.data())
-                except MDSplus.TreeNNF:
+                except AttributeError:
                     pass
 
                 delta_time = float(1.0 / self.device.FREQUENCY.data() * hardware_decimation)
