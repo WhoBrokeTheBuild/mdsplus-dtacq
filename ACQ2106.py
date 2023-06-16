@@ -1581,6 +1581,8 @@ class ACQ2106(MDSplus.Device):
             raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
 
         self._init(uut)
+        
+        uut.s0.set_abort = '1'
 
         self.RUNNING.on = True
 
