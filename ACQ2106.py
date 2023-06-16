@@ -1599,13 +1599,12 @@ class ACQ2106(MDSplus.Device):
         trigger_source = str(self.TRIGGER.SOURCE.data()).upper()
         if trigger_source in self._TRIGGER_SOURCE_D0_OPTIONS:
             highway = 'd0'
-            uut.s0.SIG_EVENT_SRC_0 = trigger_source # In the EVENT bus, the source needs to be TRG to make the transition PRE->POST
+            uut.s0.SIG_EVENT_SRC_0 = 'TRG' # System trigger, configured by _set_sync_role
         elif trigger_source in self._TRIGGER_SOURCE_D1_OPTIONS:
             highway = 'd1'
-            uut.s0.SIG_EVENT_SRC_1 = trigger_source # In the EVENT bus, the source needs to be TRG to make the transition PRE->POST
-            
+            uut.s0.SIG_EVENT_SRC_1 = 'TRG' # System trigger, configured by _set_sync_role
         
-        for site in list(map(int, uut.get_aggregator_sites())): # TODO: sorted() ?
+        for site in list(map(int, uut.get_aggregator_sites())):
             client = uut.modules[site]
             
             client.EVENT0          = 'enable'
