@@ -1587,10 +1587,32 @@ class ACQ2106(MDSplus.Device):
         monitor = self.Monitor(self)
         monitor.setDaemon(True)
         monitor.start()
+        
+        # TODO: Move
+        
+        presamples = int(self.TRANSIENT.PRESAMPLES.data())
+        postsamples = int(self.TRANSIENT.POSTSAMPLES.data())
+        
+        uut.s0.transient = f"PRE={presamples} POST={postsamples}"
 
+        highway = None
         trigger_source = str(self.TRIGGER.SOURCE.data()).upper()
-        if (trigger_source == 'STRIG'):
-            uut.s0.TRANSIENT_SET_ARM = '1'
+        if trigger_source in self._TRIGGER_SOURCE_D0_OPTIONS:
+            highway = 'd0'
+            uut.s0.SIG_EVENT_SRC_0 = trigger_source # In the EVENT bus, the source needs to be TRG to make the transition PRE->POST
+        elif trigger_source in self._TRIGGER_SOURCE_D1_OPTIONS:
+            highway = 'd1'
+            uut.s0.SIG_EVENT_SRC_1 = trigger_source # In the EVENT bus, the source needs to be TRG to make the transition PRE->POST
+            
+        
+        for site in list(map(int, uut.get_aggregator_sites())): # TODO: sorted() ?
+            client = uut.modules[site]
+            
+            client.EVENT0          = 'enable'
+            client.EVENT0_DX       = highway
+            client.EVENT0_SENSE    = 'rising'
+
+        uut.s0.TRANSIENT_SET_ARM = '1'
 
     ARM_TRANSIENT = arm_transient
 
