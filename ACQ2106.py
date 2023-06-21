@@ -1299,7 +1299,8 @@ class ACQ2106(MDSplus.Device):
                 for site in list(map(int, uut.get_aggregator_sites())):
                     site_node = self.device.getNode(f"SITE{site}")
                     client = uut.modules[site]
-                    for input_index in range(int(client.NCHAN)):
+                    site_nchan = int(client.NCHAN)
+                    for input_index in range(site_nchan):
                         input_node = site_node.getNode(f"INPUT_{input_index + 1:02}")
                         input_nodes.append(input_node)
                         
@@ -1355,29 +1356,37 @@ class ACQ2106(MDSplus.Device):
 
                     # Credit to Mark W. for this masterpiece
                     # data for channel N is data_reshaped[:, N]
-                    data_reshaped = np.reshape(data, (self.reader.segment_length, samples_per_row,))[:, : self.reader.nchan]
+                    data_reshaped = np.reshape(data, (self.reader.segment_length, samples_per_row,))
 
-                    for i, input in enumerate(input_nodes):
-                        if input.on:
-                            segment_length = self.reader.segment_length / software_decimations[i]
-                            input_delta_time = delta_time * software_decimations[i]
-                            input_data = data_reshaped[:: software_decimations[i], i]
+                    for input_index, input_node in enumerate(input_nodes):
+                        if input_node.on:
+                            segment_length = self.reader.segment_length / software_decimations[input_index]
+                            input_delta_time = delta_time * software_decimations[input_index]
+                            input_data = data_reshaped[:: software_decimations[input_index], input_index]
 
                             begin = (segment_index * segment_length * input_delta_time) + time_at_0
                             end = begin + ((segment_length - 1) * input_delta_time)
                             dim = MDSplus.Range(begin, end, input_delta_time)
 
-                            input.makeSegmentResampled(begin, end, dim, input_data, resampled_nodes[i], resample_factors[i])
+                            input_node.makeSegmentResampled(begin, end, dim, input_data, resampled_nodes[input_index], resample_factors[input_index])
 
                     if self.reader.nspad > 0:
-                        data_spad_reshaped = np.reshape(data_int32, (self.reader.segment_length, samples_per_row,))[:, self.reader.nchan :]
+                        spad_nchan = self.reader.nchan
+                        if uut.data_size() == 2:
+                            # Account for 16 bit channels
+                            spad_nchan /= 2
+                        
+                        spad_nchan = int(spad_nchan)
+                        spad_samples_per_row = spad_nchan + self.reader.nspad
+
+                        data_spad_reshaped = np.reshape(data_int32, (self.reader.segment_length, spad_samples_per_row,))[:, spad_nchan :]
 
                         begin = segment_index * self.reader.segment_length * delta_time
                         end = begin + ((self.reader.segment_length - 1) * delta_time)
                         dim = MDSplus.Range(begin, end, delta_time)
 
-                        for i in range(self.reader.nspad):
-                            spad_nodes[i].makeSegment(begin, end, dim, data_spad_reshaped[:, i])
+                        for spad_index in range(self.reader.nspad):
+                            spad_nodes[spad_index].makeSegment(begin, end, dim, data_spad_reshaped[:, spad_index])
 
                     benchmark_end = time.time()
                     benchmark_elapsed = benchmark_end - benchmark_start
@@ -1433,7 +1442,12 @@ class ACQ2106(MDSplus.Device):
                 # All remaining channels are actual data
                 self.nchan = uut.nchan() - self.nspad
 
-                bytes_per_row = (self.nchan * uut.data_size()) + (self.nspad * 4) # SPAD channels are always 32 bit
+                # SPAD values are always 32 bit, so for 16 bit digitizers they show up
+                # as twice as many "extra channels"
+                if uut.data_size() == 2:
+                    self.nchan -= self.nspad
+
+                bytes_per_row = int(uut.s0.ssb)
 
                 # Find the lowest common decimator
                 decimator = 1
@@ -1595,7 +1609,7 @@ class ACQ2106(MDSplus.Device):
         presamples = int(self.TRANSIENT.PRESAMPLES.data())
         postsamples = int(self.TRANSIENT.POSTSAMPLES.data())
         
-        uut.s0.transient = f"PRE={presamples} POST={postsamples}"
+        uut.s0.transient = f"PRE={presamples} POST={postsamples} DEMUX=0"
 
         highway = None
         trigger_source = str(self.TRIGGER.SOURCE.data()).upper()
@@ -1618,6 +1632,8 @@ class ACQ2106(MDSplus.Device):
     ARM_TRANSIENT = arm_transient
 
     def store_transient(self):
+        import acq400_hapi
+
         mode = str(self.MODE.data()).upper()
         if mode != 'TRANSIENT':
             raise Exception('Device is not configured for transient recording. Set MODE to "TRANSIENT" and then run configure().')
@@ -1633,49 +1649,123 @@ class ACQ2106(MDSplus.Device):
         while uut.statmon.get_state() != 0:
             pass
         
-        presamples = int(self.TRANSIENT.PRESAMPLES.data())
-        postsamples = int(self.TRANSIENT.POSTSAMPLES.data())
+        # Use the actual counts for pre/post samples, not the requested
+        presamples = int(uut.s0.TRANS_ACT_PRE.split(' ')[1])
+        postsamples = int(uut.s0.TRANS_ACT_POST.split(' ')[1])
+
+        self._log_verbose(f"Recorded pre/post {presamples}/{postsamples}")
         
         start_index = -presamples + 1
         end_index = postsamples
         
-        clock_period = 1.0 / self.FREQUENCY.data()
+        # HARD_DECIM only exists for 32-bit modules
+        hardware_decimation = 1
+        try:
+            hardware_decimation = int(self.HARD_DECIM.data())
+        except AttributeError:
+            pass
+
+        clock_period = float(1.0 / self.FREQUENCY.data() * hardware_decimation)
         
-        mds_window = MDSplus.Window(start_index, end_index, 0)
+        time_at_0 = self.TRIGGER.TIME_AT_0.data()
+        mds_window = MDSplus.Window(start_index, end_index, time_at_0)
         mds_range = MDSplus.Range(None, None, clock_period)
         mds_dim = MDSplus.Dimension(mds_window, mds_range)
 
-        raw_data = uut.read_channels()
-        
-        channel_offset = 0
+        input_nodes = []
         for site in list(map(int, uut.get_aggregator_sites())): # TODO: sorted() ?
             site_node = self.getNode(f"SITE{site}")
             client = uut.modules[site]
-            nchan = int(client.NCHAN)
-            
-            for input_index in range(nchan):
+            site_nchan = int(client.NCHAN)
+            for input_index in range(site_nchan):
                 input_node = site_node.getNode(f"INPUT_{input_index + 1:02}")
-                
-                signal = MDSplus.Signal(raw_data[channel_offset + input_index], None, mds_dim)
-                input_node.putData(signal)
-            
-            channel_offset += nchan
+                input_nodes.append(input_node)
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(6) # TODO: Investigate making this configurable or something
+        sock.connect((self.ADDRESS.data(), acq400_hapi.AcqPorts.DATA0))
+
+        bytes_per_row = int(uut.s0.ssb)
+        total_samples = (presamples + postsamples)
+        total_bytes = bytes_per_row * total_samples
+        buffer = bytearray(total_bytes)
+        view = memoryview(buffer)
+
+        try:
+            bytes_needed = total_bytes
+            while bytes_needed > 0:
+                bytes_read = sock.recv_into(view, bytes_needed)
+                if bytes_read == 0:
+                    break
+
+                view = view[bytes_read:]
+                bytes_needed -= bytes_read
         
+        except socket.timeout:
+            # TODO:
+            pass
+
+        except socket.error:
+            # TODO:
+            pass
+
         # Determine how many extra SPAD channels there are
         # [0] is 1=enabled/0=disabled
         # [1] is the number of SPAD channels
         # [2] can be ignored
         spad_enabled, nspad, _ = uut.s0.spad.split(',')
         nspad = int(nspad) if spad_enabled == '1' else 0
+
+        # Used by both 32-bit input modules and the SPAD
+        data_int32 = np.frombuffer(buffer, dtype='int32')
+
+        data = None
+        nchan = uut.nchan()
+        if uut.data_size() == 4:
+            data = np.right_shift(data_int32, 8)
+            nchan -= nspad
+        else:
+            data = np.frombuffer(buffer, dtype='int16')
+            nchan -= (nspad * 2) # SPAD are always 32 bit
+
+        # Credit to Mark W. for this masterpiece
+        # data for channel N is data_reshaped[:, N]
+        chan_per_row = uut.nchan()
+        data_reshaped = np.reshape(data, (total_samples, chan_per_row,))
+
+        for input_index, input_node in enumerate(input_nodes):
+            signal = MDSplus.Signal(
+                MDSplus.ADD(
+                    MDSplus.MULTIPLY(
+                        input_node.COEFFICIENT,
+                        MDSplus.dVALUE()
+                    ),
+                    input_node.OFFSET
+                ),
+                data_reshaped[:, input_index],
+                mds_dim
+            )
+            input_node.putData(signal)
             
-        for spad_index in range(self._MAX_SPAD):
-            spad_node = self.SCRATCHPAD.getNode(f"SPAD{spad_index}")
-            if spad_index < nspad:
-                signal = MDSplus.Signal(raw_data[channel_offset + spad_index], None, mds_dim)
-                spad_node.putData(signal)
-            else:
-                # Turn off the unused SPAD nodes
-                spad_node.on = False
+        if nspad > 0:
+            spad_nchan = nchan
+            if uut.data_size() == 2:
+                # Account for 16 bit channels
+                spad_nchan /= 2
+
+            spad_nchan = int(spad_nchan)
+            spad_chan_per_row = spad_nchan + nspad
+
+            data_spad_reshaped = np.reshape(data_int32, (total_samples, spad_chan_per_row,))[:, spad_nchan :]
+            
+            for spad_index in range(self._MAX_SPAD):
+                spad_node = self.SCRATCHPAD.getNode(f"SPAD{spad_index}")
+                if spad_index < nspad:
+                    signal = MDSplus.Signal(data_spad_reshaped[:, spad_index], None, mds_dim)
+                    spad_node.putData(signal)
+                else:
+                    # Turn off the unused SPAD nodes
+                    spad_node.on = False
 
         event_name = str(self.TRANSIENT.EVENT_NAME.data())
         MDSplus.Event(event_name)
