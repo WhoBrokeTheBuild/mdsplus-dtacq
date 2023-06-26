@@ -1135,30 +1135,46 @@ class ACQ2106(MDSplus.Device):
         _DIO_MODELS = ['DIO482ELF', 'DIO482ELF_TD']
 
         for site, client in sorted(uut.modules.items()):
-            site_node = self.device.getNode(f"SITE{site}")
+            site_node = self.getNode(f"SITE{site}")
             model = str(site_node.MODEL.data()) # or get it from the uut ?
 
-            is_gpg = model == 'GPG ???'
+            if model not in _DIO_MODELS:
+                continue
+            
+            # The following has to be set for GPG as well as PG4 and PG5
+            try:
+                client.GPG_ENABLE = 1
+                client.GPG_MODE   = 'LOOP'
+            except:
+                pass
+            
+            highway = None
+            trigger_source = str(self.TRIGGER.SOURCE.data()).upper()
+            if trigger_source in self._TRIGGER_SOURCE_D0_OPTIONS:
+                highway = 'd0'
+            elif trigger_source in self._TRIGGER_SOURCE_D1_OPTIONS:
+                highway = 'd1'
 
-            # if is_gpg:
-                # client.GPG_ENABLE = 1
-                # client.GPG_MODE   = 'LOOP'
+            
+            client.TRG        = 'enable'
+            client.TRG_DX     = highway
+            client.TRG_SENSE  = 'rising'
 
-                # client.GPG_TRG        = 'enable'
-                # client.GPG_TRG_DX     = str(self.gpg_trg_dx.data())
-                # client.GPG_TRG_SENSE  = 'rising'
-
-                # self._log_info('Setting Trigger for GPG')
-
-            if model in _DIO_MODELS:
-                client.TRG        = 'enable'
-                client.TRG_DX     = str(self.TRIGGER.WRTD_SOURCE.data())
-                client.TRG_SENSE  = 'rising'
-
-                self._log_info(f"Setting Trigger for DIO482 in site {site}")
-                
-            nchan = int(client.NCHAN)
-
+            self._log_info(f"Setting Trigger for DIO482 in site {site}")
+            
+            # client.NCHAN returns 32
+            #nchan = int(client.NCHAN)
+            # try:
+            #     client.DO_5
+            #     nchan = 5
+            # except:
+            #     nchan = 4
+            #     pass
+            
+            nchan = 4
+            if 'DO_5' in client.help():
+                nchan = 5
+            
             data_by_chan = []
             all_times = []
 
@@ -1199,8 +1215,8 @@ class ACQ2106(MDSplus.Device):
 
             # TODO: depending on the hardware there is a limit number of states allowed.
             # The lines below limits the number of the CMOD's 1800 states table to just 510:
-            # binary_rows = binary_rows[0:510]
-            # times_usecs = times_usecs[0:510]
+            binary_rows = binary_rows[0:510]
+            times_usecs = times_usecs[0:510]
 
             # Write to a list with states in HEX form.
             stl  = ''
@@ -1210,13 +1226,9 @@ class ACQ2106(MDSplus.Device):
             self._log_verbose(f"STL Table for site {site}")
             self._log_verbose(stl)
 
-            # What follows checks if the system is a GPG module (site 0) or a PG module (site 1..6)
-            if is_gpg:
-                uut.load_wrpg(stl)
-                self._log_info('Uploaded STL for GPG')
-            else:
-                uut.load_dio482pg(site, stl)
-                self._log_info(f"Uploaded STL for site {site}")
+
+            uut.load_dio482pg(site, stl)
+            self._log_info(f"Uploaded STL for site {site}")
 
     class Monitor(threading.Thread):
         """Monitor thread for recording device temperature and voltage"""
@@ -1809,7 +1821,7 @@ class ACQ2106(MDSplus.Device):
         uut.s0.WR_TRG_DX = str(self.TRIGGER.WRTD_SOURCE.data())
 
         for site, client in sorted(uut.modules.items()):
-            site_node = self.device.getNode(f"SITE{site}")
+            site_node = self.getNode(f"SITE{site}")
             model = str(site_node.MODEL.data())
 
             if model == 'DIO482ELF_TD': # TIGA
