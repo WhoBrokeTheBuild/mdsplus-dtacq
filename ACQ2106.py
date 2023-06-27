@@ -1323,7 +1323,7 @@ class ACQ2106(MDSplus.Device):
                 spad_nodes = []
                 for spad_index in range(self.device._MAX_SPAD):
                     spad_node = self.device.SCRATCHPAD.getNode(f"SPAD{spad_index}")
-                    if i < self.reader.nspad:
+                    if spad_index < self.reader.nspad:
                         spad_nodes.append(spad_node)
                     else:
                         # Turn off the unused SPAD nodes
