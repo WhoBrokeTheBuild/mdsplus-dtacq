@@ -31,62 +31,6 @@ import threading
 import time
 import queue
 
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from functools import partial
-
-class DeviceSetup:
-
-    def __init__(self, device):
-        self.device = device
-
-        css = '''
-        html { font-family: sans-serif; }
-        '''
-
-        self.html = f'''
-            <style>{css}</style>
-            <h1>{self.device.__class__.__name__} Setup</h1>
-            <div>
-                Path: {self.device.path} <br />
-                Tree: {self.device.tree.name} <br />
-                Shot: {self.device.tree.shot} <br />
-                {'Open for Edit' if self.device.tree.open_for_edit else ''}
-            </div>
-        '''
-
-    def _generate_html_input_for_node(self, node):
-        html = f'''
-        <input type="{asdf}" />
-        '''
-
-    class HTTPRequestHandler(BaseHTTPRequestHandler):
-        def __init__(self, setup, *args, **kwargs):
-            self.html = setup.html
-            super().__init__(*args, *kwargs)
-
-        def do_HEAD(self):
-            self.send_response(200)
-
-        def do_GET(self):
-            if self.path == '/':
-                self.send_response(200)
-                self.send_header('Content-Type', 'text/html')
-                self.end_headers()
-                self.wfile.write(self.html.encode())
-
-        def do_POST(self):
-            pass
-
-    def run(self):
-        handler = partial(self.HTTPRequestHandler, self)
-
-        # server = HTTPServer(('', 0), self.get_handler)
-        server = HTTPServer(('', 8000), handler)
-        print('http://%s:%d' % server.server_address)
-
-        server.serve_forever()
-
-
 class ACQ2106(MDSplus.Device):
     '''
     # ACQ2106 Device Driver
@@ -968,8 +912,7 @@ class ACQ2106(MDSplus.Device):
 
     # TODO:
     # def setup(self):
-    #     ds = DeviceSetup(self)
-    #     ds.run()
+    #     pass
     # SETUP = setup
 
     def _init(self, uut):
@@ -1618,10 +1561,7 @@ class ACQ2106(MDSplus.Device):
         
         # TODO: Move
         
-        presamples = int(self.TRANSIENT.PRESAMPLES.data())
-        postsamples = int(self.TRANSIENT.POSTSAMPLES.data())
-        
-        uut.s0.transient = f"PRE={presamples} POST={postsamples} DEMUX=0"
+        uut.s0.transient = f"PRE={self.TRANSIENT.PRESAMPLES.data()} POST={self.TRANSIENT.POSTSAMPLES.data()} DEMUX=0"
 
         highway = None
         trigger_source = str(self.TRIGGER.SOURCE.data()).upper()
