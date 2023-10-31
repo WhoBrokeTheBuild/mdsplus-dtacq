@@ -1448,6 +1448,9 @@ class ACQ2106(MDSplus.Device):
                         while bytes_needed > 0:
                             bytes_read = self.socket.recv_into(view, bytes_needed)
 
+                            if bytes_read == 0 and not self.running:
+                                break
+
                             # TODO: Make more accurate, possibly account for the time it took to read the segment, possibly use the SPAD
                             if first_recv:
                                 first_recv = False
