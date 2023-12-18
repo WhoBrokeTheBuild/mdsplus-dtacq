@@ -384,10 +384,11 @@ class ACQ2106(MDSplus.Device):
             },
         },
         {
-            'path': ':INIT_ACTION',
-            'type': 'action',
-            'valueExpr': "Action(Dispatch('MDSIP_SERVER','INIT',50,None),Method(None,'INIT',head,'auto'))",
-            'options': ('no_write_shot',)
+            'path': ':ACTIONS',
+            'type': 'structure',
+            'ext_options': {
+                'tooltip': 'Contains actions for use with a dispatcher.',
+            },
         },
         {
             'path': ':DEFAULTS',
@@ -488,6 +489,33 @@ class ACQ2106(MDSplus.Device):
             },
         },
         {
+            'path': ':ACTIONS:START',
+            'type': 'action',
+            'valueExpr': "Action(Dispatch('MDSIP_SERVER','INIT',50,None),Method(None,'START_STREAM',head))",
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'An action that can be used to call start_stream().',
+            },
+        },
+        {
+            'path': ':ACTIONS:STOP',
+            'type': 'action',
+            'valueExpr': "Action(Dispatch('MDSIP_SERVER','STORE',50,None),Method(None,'STOP_STREAM',head))",
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'An action that can be used to call stop_stream().',
+            },
+        },
+        {
+            'path': ':ACTIONS:ABORT',
+            'type': 'action',
+            'valueExpr': "Action(Dispatch('MDSIP_SERVER','DEINIT',50,None),Method(None,'ABORT_STREAM',head))",
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'An action that can be used to call abort_stream().',
+            },
+        },
+        {
             'path': ':DEFAULTS:SOFT_DECIM',
             'type': 'numeric',
             'value': 1,
@@ -543,6 +571,24 @@ class ACQ2106(MDSplus.Device):
             'options':('no_write_shot',),
             'ext_options': {
                 'tooltip': 'Name of the event generated when the pre and post samples are stored.',
+            },
+        },
+        {
+            'path': ':ACTIONS:ARM',
+            'type': 'action',
+            'valueExpr': "Action(Dispatch('MDSIP_SERVER','ARM',50,None),Method(None,'ARM_TRANSIENT',head))",
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'An action that can be used to call arm_transient().',
+            },
+        },
+        {
+            'path': ':ACTIONS:STORE',
+            'type': 'action',
+            'valueExpr': "Action(Dispatch('MDSIP_SERVER','STORE',50,None),Method(None,'STORE_TRANSIENT',head))",
+            'options': ('no_write_shot',),
+            'ext_options': {
+                'tooltip': 'An action that can be used to call store_transient().',
             },
         },
     ]
