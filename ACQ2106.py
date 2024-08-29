@@ -763,8 +763,12 @@ class ACQ2106(MDSplus.Device):
             },
         ]
 
-        if model == 'ACQ435ELF' or model == 'ACQ423ELF':
-            for input_index in range(32):
+        if model == 'ACQ435ELF' or model == 'ACQ423ELF' or model == 'ACQ482ELF':
+            nchan = 32
+            if model == 'ACQ482ELF':
+                nchan = 8
+
+            for input_index in range(nchan):
                 input_path = site_path + f":INPUT_{input_index + 1:02}"
                 parts += [
                     {
@@ -936,6 +940,9 @@ class ACQ2106(MDSplus.Device):
         elif model == 'ACQ423ELF':
             info['nchan'] = 32
             info['input'] = True
+        elif model == 'ACQ482ELF':
+            info['nchan'] = 8
+            info['input'] = True
         elif model == 'ACQ424ELF':
             info['nchan'] = 32
             info['output'] = True
@@ -1006,7 +1013,13 @@ class ACQ2106(MDSplus.Device):
 
         # Positional Arguments
         current_sync_role = current_sync_role_parts[0]
-        current_frequency = int(current_sync_role_parts[1])
+        current_frequency = current_sync_role_parts[1]
+
+        # TODO: Improve
+        if current_frequency[-1] == 'M':
+            current_frequency = int(current_frequency[:-1]) * 1000000
+        else:
+            current_frequency = int(current_frequency)
 
         # Keyword Arguments
         current_arguments = dict()
@@ -1040,7 +1053,7 @@ class ACQ2106(MDSplus.Device):
         if changed:
             self._log_info('Reconfiguring sync role, this may take some time.')
             uut.s0.sync_role = f"{self.SYNC_ROLE.data()} {int(self.FREQUENCY.data())} {self._dict_to_string(requested_arguments)}"
-
+              
         # snyc_role will set a default trigger source, so we need to set these after
         self._log_info(f"Setting trigger source of timing highway {requested_arguments['TRG:DX']} to {trigger_source}")
         if requested_arguments['TRG:DX'] == 'd0':
@@ -1059,6 +1072,36 @@ class ACQ2106(MDSplus.Device):
 
         except AttributeError:
             pass
+        
+    # def _setup_wrtd_trigger(self):
+    #     uut = self._get_uut()
+    #     if uut is None:
+    #         raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
+
+    #     try:
+    #         uut.cC.WRTD_ID = str(self.WR.TX_MESSAGE.data())
+    #     except MDSplus.TreeNODATA:
+    #         pass
+
+    #     uut.s0.WR_TRG = 1
+    #     uut.s0.WR_TRG_DX = str(self.TRIGGER.WRTD_SOURCE.data())
+
+    #     for site, client in sorted(uut.modules.items()):
+    #         site_node = self.getNode(f"SITE{site}")
+    #         model = str(site_node.MODEL.data())
+
+    #         if model == 'DIO482ELF_TD': # TIGA
+    #             self._log_info(f"Configuring WR TIming Generator Appliance (TIGA) Triggers for site {site}")
+
+    #             try:
+    #                 client.WRTD_ID = str(site_node.TX_MESSAGE.data())
+    #             except MDSplus.TreeNODATA:
+    #                 pass
+                
+    #             client.WRTD_TX_MASK = (1 << (site + 1)) # TODO: Investigate
+
+    #             client.TRG = 1
+    #             client.TRG_DX = str(site_node.WRTD_SOURCE.data()) # TODO: Better name
 
     def _setup_wr(self, uut):
 
@@ -1066,8 +1109,11 @@ class ACQ2106(MDSplus.Device):
         motherboard_clock_rate = float(uut.s0.SIG_CLK_MB_FREQ.split(' ')[1])
         ns_per_tick = 1.0 / motherboard_clock_rate * self._SECONDS_TO_NANOSECONDS
 
-        # This is done automatically at boot, but if you change the sync role while running, it needs to be recalculated
-        uut.cC.WRTD_TICKNS = ns_per_tick
+        try:
+            # This is done automatically at boot, but if you change the sync role while running, it needs to be recalculated
+            uut.cC.WRTD_TICKNS = ns_per_tick
+        except AttributeError:
+            pass
 
         try:
             ns_per_tick_node = self.WR.NS_PER_TICK
@@ -1089,7 +1135,7 @@ class ACQ2106(MDSplus.Device):
             uut.cC.wrtd_commit_rx = 1
             uut.cC.wrtd_commit_tx = 1
 
-        except MDSplus.TreeNNF:
+        except (MDSplus.TreeNNF, AttributeError):
             pass
 
     def _set_signal_conditioning_gains(self, uut):
@@ -1412,7 +1458,12 @@ class ACQ2106(MDSplus.Device):
 
         def run(self):
             import acq400_hapi
-            from fractions import gcd
+            
+            try:
+                from fractions import gcd
+            
+            except:
+                from math import gcd
 
             try:
                 self.tree = MDSplus.Tree(self.tree_name, self.tree_shot)
@@ -1643,6 +1694,8 @@ class ACQ2106(MDSplus.Device):
         if uut is None:
             raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
 
+        mgt = acq400_hapi.Mgt508('mgt508-005')
+
         self.RUNNING.on = False
 
         # Wait for post-processing to finish
@@ -1651,9 +1704,11 @@ class ACQ2106(MDSplus.Device):
             pass
         
         # Use the actual counts for pre/post samples, not the requested
+        # presamples = int(mgt.s0.TRANS_ACT_PRE.split(' ')[1])
+        # postsamples = int(mgt.s0.TRANS_ACT_POST.split(' ')[1])
         presamples = int(uut.s0.TRANS_ACT_PRE.split(' ')[1])
         postsamples = int(uut.s0.TRANS_ACT_POST.split(' ')[1])
-
+        
         self._log_verbose(f"Recorded pre/post {presamples}/{postsamples}")
         
         start_index = -presamples + 1
@@ -1685,6 +1740,7 @@ class ACQ2106(MDSplus.Device):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(6) # TODO: Investigate making this configurable or something
         sock.connect((self.ADDRESS.data(), acq400_hapi.AcqPorts.DATA0))
+        #sock.connect(('mgt508-005', acq400_hapi.Mgt508Ports.READ))
 
         bytes_per_row = int(uut.s0.ssb)
         total_samples = (presamples + postsamples)
@@ -1698,6 +1754,10 @@ class ACQ2106(MDSplus.Device):
                 bytes_read = sock.recv_into(view, bytes_needed)
                 if bytes_read == 0:
                     break
+                
+                print(f"Read {bytes_read} bytes ({total_bytes - bytes_needed}/{total_bytes})")
+                
+                self._log_verbose(f"Read {bytes_read} bytes ({total_bytes - bytes_needed}/{total_bytes})")
 
                 view = view[bytes_read:]
                 bytes_needed -= bytes_read
@@ -1795,38 +1855,6 @@ class ACQ2106(MDSplus.Device):
         self._setup_pulse_generators(uut)
 
     ARM_PULSE_GENERATORS = arm_pulse_generators
-
-    def wrtd_trigger(self):
-        uut = self._get_uut()
-        if uut is None:
-            raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
-
-        try:
-            uut.cC.WRTD_ID = str(self.WR.TX_MESSAGE.data())
-        except MDSplus.TreeNODATA:
-            pass
-
-        uut.s0.WR_TRG = 1
-        uut.s0.WR_TRG_DX = str(self.TRIGGER.WRTD_SOURCE.data())
-
-        for site, client in sorted(uut.modules.items()):
-            site_node = self.getNode(f"SITE{site}")
-            model = str(site_node.MODEL.data())
-
-            if model == 'DIO482ELF_TD': # TIGA
-                self._log_info(f"Configuring WR TIming Generator Appliance (TIGA) Triggers for site {site}")
-
-                try:
-                    client.WRTD_ID = str(site_node.TX_MESSAGE.data())
-                except MDSplus.TreeNODATA:
-                    pass
-                
-                client.WRTD_TX_MASK = (1 << (site + 1)) # TODO: Investigate
-
-                client.TRG = 1
-                client.TRG_DX = str(site_node.WRTD_SOURCE.data()) # TODO: Better name
-
-    WRTD_TRIGGER = wrtd_trigger
 
     def send_wrtd_message(self, message):
         uut = self._get_uut()
@@ -1982,8 +2010,10 @@ class ACQ2106(MDSplus.Device):
             self.MODULES.record = self._dict_to_string(modules)
 
             data_size = uut.data_size()
+            self._log_info(f"Data size is {data_size}")
 
-            # aggregator_sites = list(map(int, uut.get_aggregator_sites()))
+            aggregator_sites = list(map(int, uut.get_aggregator_sites()))
+            self._log_info(f"Aggregator sites are {aggregator_sites}")
 
         else:
 
@@ -1991,10 +2021,12 @@ class ACQ2106(MDSplus.Device):
 
             self._log_info('Configuring offline, you will need to run configure with access to the ACQ at least once before running.')
 
+            has_wr = False
             if 'has_wr' in kwargs and self._to_bool(kwargs['has_wr']):
                 self._log_info('Assuming White Rabbit capabilities')
                 has_wr = True
 
+            has_sc = False
             if 'has_sc' in kwargs and self._to_bool(kwargs['has_sc']):
                 self._log_info('Assuming Signal Conditioning capabilities')
                 has_sc = True
@@ -2062,40 +2094,40 @@ class ACQ2106(MDSplus.Device):
 
         # TODO: Replace with Node Hardlinks when available
 
-        # all_inputs = []
-        # for site in aggregator_sites:
-        #     model = modules[site]
-        #     info = self._get_module_info(model)
+        all_inputs = []
+        for site in aggregator_sites:
+            model = modules[site]
+            info = self._get_module_info(model)
 
-        #     site_node = self.getNode(f"SITE{site}")
-        #     for input in range(info['nchan']):
-        #         input_node = site_node.getNode(f"INPUT_{input + 1:02}")
-        #         all_inputs.append(input_node)
+            site_node = self.getNode(f"SITE{site}")
+            for input in range(info['nchan']):
+                input_node = site_node.getNode(f"INPUT_{input + 1:02}")
+                all_inputs.append(input_node)
 
-        # self._log_info(f"Found a total of {len(all_inputs)} aggregated inputs")
+        self._log_info(f"Found a total of {len(all_inputs)} aggregated inputs")
 
-        # if len(all_inputs) > 0:
-        #     input_parts = [
-        #         {
-        #             'path': ':INPUTS',
-        #             'type': 'structure',
-        #         }
-        #     ]
-        #     for input_index, input_node in enumerate(all_inputs):
-        #         input_path = f":INPUTS:INPUT_{input_index + 1:03}"
-        #         input_parts += [
-        #             {
-        #                 'path': input_path,
-        #                 'type': 'signal',
-        #                 'value': input_node,
-        #             },
-        #             {
-        #                 'path': input_path + ':RESAMPLED',
-        #                 'type': 'signal',
-        #                 'value': input.RESAMPLED,
-        #             },
-        #         ]
-        #     self._add_parts(input_parts, overwrite_data)
+        if len(all_inputs) > 0:
+            input_parts = [
+                {
+                    'path': ':INPUTS',
+                    'type': 'structure',
+                }
+            ]
+            for input_index, input_node in enumerate(all_inputs):
+                input_path = f":INPUTS:INPUT_{input_index + 1:03}"
+                input_parts += [
+                    {
+                        'path': input_path,
+                        'type': 'signal',
+                        'value': input_node,
+                    },
+                    # {
+                    #     'path': input_path + ':RESAMPLED',
+                    #     'type': 'signal',
+                    #     'value': input.RESAMPLED,
+                    # },
+                ]
+            self._add_parts(input_parts, overwrite_data)
 
         # print(f"Found a total of {len(self._configure_outputs)} inputs")
 
@@ -2284,6 +2316,8 @@ class ACQ2106(MDSplus.Device):
                 self._log_verbose(f"Adding {node.path}")
             except MDSplus.mdsExceptions.TreeALREADY_THERE:
                 node = self.getNode(part['path'])
+                # TODO: Improve to not randomly turn things back on that the user may have intentionally turned off
+                node.on = True # In case it was turned off by `delete_nodes=False`
                 self._log_verbose(f"Found {node.path}")
 
         # Then you can reference them in valueExpr
