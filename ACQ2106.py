@@ -884,27 +884,39 @@ class ACQ2106(MDSplus.Device):
         elif model == 'AO424ELF':
             pass
 
+        #non-TIGA PG nchans = 32
         elif model == 'DIO482ELF':
-            pass
+            parts += [
+                {
+                    'path': site_path + ':STL',
+                    'type': 'text',
+                    'options': ('no_write_model',),
+                    'ext_options': {
+                        'tooltip': 'The State Transition List (STL) that was generated and sent to the device.',
+                    },
+                },
+            ]
 
+            for output_index in range(32):
+                output_path = site_path + f":OUTPUT_{output_index + 1:02}"
+                parts += [
+                    {
+                        'path': output_path,
+                        'type': 'signal',
+                        'ext_options': {
+                            'tooltip': 'Data for this ',
+                        },
+                    },
+                ]
+        #TIGA: PG nchans = 4
         elif model == 'DIO482ELF_TD':
             parts += [
                 {
-                    'path': site_path + ':TX_MESSAGE', # TODO: Better name
+                    'path': site_path + ':STL',
                     'type': 'text',
-                    'options': ('no_write_shot',),
+                    'options': ('no_write_model',),
                     'ext_options': {
-                        'tooltip': 'Message to send with WR when triggered.',
-                    },
-                },
-                {
-                    'path': site_path + ':WRTD_SOURCE', # TODO: Better name
-                    'type': 'text',
-                    'value': 'FPTRG',
-                    'options': ('no_write_shot',),
-                    'ext_options': {
-                        'tooltip': 'Source of the trigger: FPTRG.',
-                        'values': self._TRIGGER_SOURCE_WR_OPTIONS,
+                        'tooltip': 'The State Transition List (STL) that was generated and sent to the device.',
                     },
                 },
             ]
@@ -1206,9 +1218,12 @@ class ACQ2106(MDSplus.Device):
             #     nchan = 4
             #     pass
             
-            nchan = 4
-            if 'DO_5' in client.help():
-                nchan = 5
+            if model == 'DIO482ELF':
+                nchan = 32
+            else:
+                nchan = 4
+                if 'DO_5' in client.help():
+                    nchan = 5
             
             data_by_chan = []
             all_times = []
@@ -1249,20 +1264,21 @@ class ACQ2106(MDSplus.Device):
                     last_row = row
 
             # TODO: depending on the hardware there is a limit number of states allowed.
-            # The lines below limits the number of the CMOD's 1800 states table to just 510:
+            # For example, the lines below limits the number of the CMOD's 1800 states table to just 510:
             binary_rows = binary_rows[0:510]
             times_usecs = times_usecs[0:510]
 
             # Write to a list with states in HEX form.
-            stl  = ''
+            stl = ''
             for time, state in zip(times_usecs, binary_rows):
                 stl += f"{time},{int(state, 2):08X}\n"
+
+            site_node.STL.record = stl
 
             self._log_verbose(f"STL Table for site {site}")
             self._log_verbose(stl)
 
-
-            uut.load_dio482pg(site, stl)
+            uut.load_dio482pg(site, stl, True)
             self._log_info(f"Uploaded STL for site {site}")
 
     class Monitor(threading.Thread):
@@ -1545,7 +1561,8 @@ class ACQ2106(MDSplus.Device):
                         while bytes_needed > 0:
                             bytes_read = self.socket.recv_into(view, bytes_needed)
 
-                            if bytes_read == 0 and not self.running:
+                            #if bytes_read == 0 and not self.running:
+                            if bytes_read == 0 and not self.device.RUNNING.on:
                                 break
 
                             # TODO: Make more accurate, possibly account for the time it took to read the segment, possibly use the SPAD
@@ -1694,7 +1711,7 @@ class ACQ2106(MDSplus.Device):
         if uut is None:
             raise Exception(f"Unable to connect to digitizer ({self.ADDRESS.data()})")
 
-        mgt = acq400_hapi.Mgt508('mgt508-005')
+        #mgt = acq400_hapi.Mgt508('mgt508-005')
 
         self.RUNNING.on = False
 
